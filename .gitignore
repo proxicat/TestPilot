@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+server/dist/
+
+# runtime data — DB, encrypted secrets vault, settings, LLM-debug captures (SENSITIVE)
+.data/
+server/.data/
+
+# Midscene run artifacts / caches / screenshots
+midscene_run/
+server/midscene_run/
+
+# local wallet seeds (SENSITIVE — never commit)
+.wallets/
+server/.wallets/
+
+# env files (may contain model keys / RPC secrets)
+.env
+.env.*
+server/.env
+server/.env.*
+
+# logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
