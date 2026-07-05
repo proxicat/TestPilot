@@ -723,6 +723,51 @@ app.post("/api/projects", (req, res) => {
   res.json({ project: createProject(String(name), String(targetUrl)) });
 });
 
+// One-click Uniswap dapp-testing example: a project pointed at the real Uniswap app with
+// starter web3 cases (injected wallet + on-chain assertions). Reused if it already exists.
+const USDC_MAINNET = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+app.post("/api/examples/uniswap", (_req, res) => {
+  const existing = listProjects().find((p) => p.name === "Uniswap (example)");
+  if (existing) return res.json({ project: existing, reused: true });
+  const project = createProject("Uniswap (example)", "https://app.uniswap.org/swap");
+  // 1) Wallet connects — works out of the box (injected wallet auto-connects via EIP-6963).
+  createCase({
+    projectId: project.id,
+    title: "Wallet connects to Uniswap",
+    priority: "P0",
+    type: "e2e",
+    priorityReason: "The injected wallet auto-connects to Uniswap via EIP-6963 — verify the app shows it.",
+    steps: [],
+    expected:
+      "The Uniswap swap page is loaded and the connected wallet address (an account like 0x…) is shown in the top-right; the swap form with a 'You pay' / 'You receive' layout is visible",
+    web3Mode: "injected",
+    chainAssertions: [],
+  });
+  // 2) Swap template with an ON-CHAIN assertion — the recommended dapp pattern. NOTE: against
+  // Uniswap's PRODUCTION app on a fork the UI reads balances from Uniswap's backend gateway
+  // (not the fork), so the UI swap may show "insufficient funds"; point this at your own
+  // deployment / a provider-reading UI, or rely on the on-chain assertion.
+  createCase({
+    projectId: project.id,
+    title: "Swap 0.01 ETH → USDC (on-chain verified)",
+    priority: "P0",
+    type: "e2e",
+    priorityReason:
+      "Template for a swap verified on-chain (USDC balance rose). On a fork, Uniswap's prod UI reads balances from its own backend — use your own RPC/deployment for a full UI swap.",
+    steps: [
+      { order: 1, text: "In the 'You pay' amount field, enter 0.01" },
+      { order: 2, text: "Open the 'You receive' token selector, search USDC, and select it" },
+      { order: 3, text: "Click the Swap button, then confirm the swap" },
+    ],
+    expected: "A swap confirmation or success state is shown (e.g. 'Swap submitted' / a success toast)",
+    web3Mode: "injected",
+    chainAssertions: [
+      { kind: "erc20Balance", op: "increased", token: USDC_MAINNET, decimals: 6, label: "USDC balance increased after the swap" },
+    ],
+  });
+  res.json({ project, reused: false });
+});
+
 app.get("/api/cases", (req, res) =>
   res.json({ cases: listCases(req.query.projectId as string | undefined) }),
 );

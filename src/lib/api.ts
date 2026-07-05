@@ -143,6 +143,9 @@ export const api = {
       screenshot?: string;
       error?: string;
     }>("/api/dapp/verify", opts, 120000),
+  // Load the one-click Uniswap dapp-testing example (project + starter web3 cases).
+  loadUniswapExample: () =>
+    post<{ project: Project; reused: boolean }>("/api/examples/uniswap", {}, 8000),
   // MetaMask extension check: launch with the extension, screenshot its UI.
   walletCheck: () =>
     post<{

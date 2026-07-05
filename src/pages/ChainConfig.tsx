@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Blocks,
   Server,
@@ -9,10 +10,14 @@ import {
   Copy,
   Play,
   Puzzle,
+  BookOpen,
+  Rocket,
+  ArrowRight,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui";
 import { useT } from "@/lib/prefs";
+import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
@@ -37,12 +42,96 @@ export function ChainConfigPage() {
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">{t("chain.subtitle")}</p>
           </div>
+          <GuideCard />
           <ChainConfigCard />
           <InjectedVerifyCard />
           <MetaMaskCard />
         </div>
       </div>
     </>
+  );
+}
+
+// How-to guide + one-click Uniswap example. Makes clear TestPilot does NOT deploy the dapp:
+// the team brings the dapp URL + a chain RPC (their fork / Tenderly / testnet).
+function GuideCard() {
+  const t = useT();
+  const navigate = useNavigate();
+  const loadData = useStore((s) => s.loadData);
+  const selectProject = useStore((s) => s.selectProject);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [msg, setMsg] = useState("");
+
+  const loadExample = async () => {
+    setState("loading");
+    setMsg("");
+    try {
+      const { project, reused } = await api.loadUniswapExample();
+      await loadData();
+      await selectProject(project.id);
+      setMsg(reused ? t("chain.exampleReused") : t("chain.exampleLoaded"));
+      navigate("/cases");
+    } catch (e) {
+      setState("error");
+      setMsg((e as Error).message);
+    }
+  };
+
+  const steps = [
+    t("chain.guideStep1"),
+    t("chain.guideStep2"),
+    t("chain.guideStep3"),
+    t("chain.guideStep4"),
+    t("chain.guideStep5"),
+  ];
+
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4 dark:border-violet-900 dark:bg-violet-950/30">
+      <div className="mb-1 flex items-center gap-1.5">
+        <BookOpen className="h-4 w-4 text-violet-500" />
+        <h2 className="font-display text-sm font-medium text-foreground">{t("chain.guideTitle")}</h2>
+      </div>
+      <p className="mb-2 text-xs leading-snug text-muted-foreground">{t("chain.guideIntro")}</p>
+      <ol className="mb-2 space-y-1 pl-1 text-xs leading-snug text-foreground">
+        {steps.map((s, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-violet-500 text-[10px] font-medium text-white">
+              {i + 1}
+            </span>
+            <span className="text-muted-foreground">{s}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+        {t("chain.guideNote")}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          className="bg-violet-600 text-xs hover:bg-violet-700"
+          onClick={loadExample}
+          disabled={state === "loading"}
+        >
+          {state === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Rocket className="h-3.5 w-3.5" />
+          )}
+          {t("chain.loadExample")}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Button>
+        {msg && (
+          <span
+            className={cn(
+              "text-[11px]",
+              state === "error" ? "text-red-600 dark:text-red-400" : "text-muted-foreground",
+            )}
+          >
+            {msg}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -26,6 +26,45 @@ export const dict: Record<string, Entry> = {
     ja: "Web3 dapp テスト（接続・署名・送信）に使うテストチェーン、RPC、ウォレットを設定します。",
   },
   "chain.testWallet": { zh: "测试钱包", en: "Test wallet", ja: "テストウォレット" },
+  "chain.guideTitle": { zh: "如何测试一个 dapp", en: "How to test a dapp", ja: "dapp のテスト方法" },
+  "chain.guideIntro": {
+    zh: "TestPilot 不部署 dapp/链。你提供 dapp 地址 + 一条链 RPC(你的 fork / Tenderly 虚拟测试网 / 公共测试网),平台自动注入一个受控钱包连上去。",
+    en: "TestPilot does NOT deploy the dapp/chain. You bring the dapp URL + one chain RPC (your fork / Tenderly Virtual TestNet / a public testnet); the platform injects a controllable wallet against it.",
+    ja: "TestPilot は dapp/チェーンをデプロイしません。dapp URL + チェーン RPC（自分の fork / Tenderly 仮想 TestNet / 公開テストネット）を用意すれば、制御可能なウォレットを注入します。",
+  },
+  "chain.guideStep1": {
+    zh: "新建项目,目标 URL 填你的 dapp(生产 / staging / 你自己的部署)。",
+    en: "Create a project with your dapp's URL (prod / staging / your own deployment).",
+    ja: "プロジェクトを作成し、目標 URL に dapp を設定（本番 / staging / 自分のデプロイ）。",
+  },
+  "chain.guideStep2": {
+    zh: "在下方「链 / RPC」配置你的链 —— 本地 fork、Tenderly、或测试网。",
+    en: "Configure your chain in Chain / RPC below — a local fork, Tenderly, or a testnet.",
+    ja: "下の「チェーン / RPC」でチェーンを設定 —— ローカル fork、Tenderly、テストネット。",
+  },
+  "chain.guideStep3": {
+    zh: "在用例上选钱包模式(注入式虚拟钱包,无头推荐);钱包自动确认连接/签名/交易。",
+    en: "On a case, pick a wallet mode (injected virtual wallet, headless); it auto-confirms connect/sign/tx.",
+    ja: "ケースでウォレットモードを選択（インジェクト仮想ウォレット推奨）。接続/署名/取引を自動承認。",
+  },
+  "chain.guideStep4": {
+    zh: "探索页开「Dapp 模式」→ AI 生成 web3 用例(连接 / 交易 / 断言,含链上校验)。",
+    en: "On Explore, toggle 'Dapp mode' → the AI generates web3 cases (connect / tx / assert) with on-chain checks.",
+    ja: "探索で「Dapp モード」→ AI が web3 ケース（接続 / 取引 / 検証）をオンチェーン検証付きで生成。",
+  },
+  "chain.guideStep5": {
+    zh: "运行 → UI 断言 + 链上断言(余额/回执)双重校验;进套件、门禁、趋势。",
+    en: "Run → verified by both the UI assertion and on-chain assertions (balance/receipt); feeds suites, gate, trends.",
+    ja: "実行 → UI アサーション + オンチェーンアサーション（残高/receipt）で二重検証。スイート・ゲート・トレンドに連動。",
+  },
+  "chain.guideNote": {
+    zh: "注意:你的 dapp UI 需从注入的钱包 provider 读取余额/状态。像 Uniswap 生产版从自家后端读余额,在 fork 上 UI 交易会显示「资金不足」—— 这类请用链上断言(校验合约结果),或指向你自己的部署 / 能读 provider 的界面。",
+    en: "Note: your dapp UI must read balances/state from the injected wallet provider. Some apps (e.g. Uniswap prod) read balances from their own backend, so on a fork the UI swap shows 'insufficient funds' — for those, rely on on-chain assertions, or point at your own deployment / a provider-reading UI.",
+    ja: "注意：dapp UI は注入されたウォレット provider から残高/状態を読む必要があります。Uniswap 本番など一部は自社バックエンドから残高を読むため、fork では UI 取引が「残高不足」になります。その場合はオンチェーンアサーション、または自分のデプロイ / provider を読む UI を使用してください。",
+  },
+  "chain.loadExample": { zh: "加载 Uniswap 示例", en: "Load Uniswap example", ja: "Uniswap の例を読み込む" },
+  "chain.exampleLoaded": { zh: "已创建示例项目 + 用例", en: "Example project + cases created", ja: "例のプロジェクト + ケースを作成しました" },
+  "chain.exampleReused": { zh: "示例项目已存在,已进入", en: "Example already exists — opened it", ja: "例は既に存在 — 開きました" },
   "chain.injectedTitle": { zh: "注入式虚拟钱包", en: "Injected virtual wallet", ja: "インジェクト仮想ウォレット" },
   "chain.default": { zh: "默认", en: "default", ja: "デフォルト" },
   "chain.injectedHelp": {
