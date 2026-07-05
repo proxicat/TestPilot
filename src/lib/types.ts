@@ -66,6 +66,7 @@ export interface TestCase {
   type: CaseType;
   requirementId?: string;
   envRef?: string;
+  dataKey?: string; // env array var to iterate — data-driven: one run per row
   postSteps?: Step[];
   quarantined?: boolean;
 }

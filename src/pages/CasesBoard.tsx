@@ -895,7 +895,11 @@ function DetailPanel({ tc, flake }: { tc: TestCase; flake?: Flakiness }) {
   const generateCode = useStore((s) => s.generateCode);
   const runCase = useStore((s) => s.runCase);
   const setQuarantine = useStore((s) => s.setQuarantine);
+  const patchCase = useStore((s) => s.patchCase);
   const [copied, setCopied] = useState(false);
+  // Data-driven binding draft (patched on blur to avoid a request per keystroke).
+  const [dataKeyDraft, setDataKeyDraft] = useState(tc.dataKey ?? "");
+  useEffect(() => setDataKeyDraft(tc.dataKey ?? ""), [tc.id, tc.dataKey]);
   const [debugOpen, setDebugOpen] = useState(false);
   // Last run of THIS case (single or suite) — shown inline. The Runs page is the
   // suite ledger; single-case forensics live here with the case.
@@ -1025,6 +1029,33 @@ function DetailPanel({ tc, flake }: { tc: TestCase; flake?: Flakiness }) {
         ) : (
           <p className="text-[11px] leading-snug text-muted-foreground">{t("cases.dataEmpty")}</p>
         )}
+
+        {/* Data-driven binding: iterate an env array var — one run per row. */}
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {t("cases.dataDriven")}
+            </span>
+            {tc.dataKey && (
+              <span className="rounded bg-emerald-100 px-1.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                {"${env." + tc.dataKey + "}"}
+              </span>
+            )}
+          </div>
+          <input
+            value={dataKeyDraft}
+            onChange={(e) => setDataKeyDraft(e.target.value)}
+            onBlur={() => {
+              const v = dataKeyDraft.trim();
+              if (v !== (tc.dataKey ?? "")) void patchCase(tc.id, { dataKey: v });
+            }}
+            placeholder={t("cases.dataDrivenPlaceholder")}
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            {t("cases.dataDrivenHelp")}
+          </p>
+        </div>
       </div>
 
       <div className="border-b border-border px-3 py-2.5">

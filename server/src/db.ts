@@ -178,6 +178,8 @@ if (!caseCols.has("postSteps"))
   db.exec("ALTER TABLE test_cases ADD COLUMN postSteps TEXT NOT NULL DEFAULT '[]'");
 if (!caseCols.has("quarantined"))
   db.exec("ALTER TABLE test_cases ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0");
+if (!caseCols.has("dataKey"))
+  db.exec("ALTER TABLE test_cases ADD COLUMN dataKey TEXT DEFAULT ''");
 const batchCols = new Set(
   (db.prepare("PRAGMA table_info(batches)").all() as { name: string }[]).map((r) => r.name),
 );
@@ -221,6 +223,7 @@ export interface TestCase {
   type: CaseType; // test-design category (equivalence/boundary/negative/e2e)
   requirementId?: string; // trace back to a requirement/PRD item
   envRef?: string; // environment name this case binds to ("" = project default)
+  dataKey?: string; // env array var to iterate — data-driven: one run per row (${row}/${row.col})
   postSteps: Step[]; // cleanup / teardown actions
   quarantined: boolean; // flaky → runs but excluded from the CI gate
   steps: Step[];
@@ -420,6 +423,7 @@ export function createCase(input: Partial<TestCase> & { projectId: string; title
     type: input.type || "functional",
     requirementId: input.requirementId || "",
     envRef: input.envRef || "",
+    dataKey: input.dataKey || "",
     postSteps: input.postSteps || [],
     quarantined: input.quarantined ?? false,
     steps: input.steps || [],
@@ -427,8 +431,8 @@ export function createCase(input: Partial<TestCase> & { projectId: string; title
     createdAt: input.createdAt || new Date().toISOString(),
   };
   db.prepare(
-    `INSERT INTO test_cases (id,projectId,title,priority,priorityReason,runStatus,hasCode,precondition,expected,type,requirementId,envRef,postSteps,quarantined,steps,code,createdAt)
-     VALUES (@id,@projectId,@title,@priority,@priorityReason,@runStatus,@hasCode,@precondition,@expected,@type,@requirementId,@envRef,@postSteps,@quarantined,@steps,@code,@createdAt)`,
+    `INSERT INTO test_cases (id,projectId,title,priority,priorityReason,runStatus,hasCode,precondition,expected,type,requirementId,envRef,dataKey,postSteps,quarantined,steps,code,createdAt)
+     VALUES (@id,@projectId,@title,@priority,@priorityReason,@runStatus,@hasCode,@precondition,@expected,@type,@requirementId,@envRef,@dataKey,@postSteps,@quarantined,@steps,@code,@createdAt)`,
   ).run({
     ...c,
     hasCode: c.hasCode ? 1 : 0,
@@ -451,12 +455,13 @@ export function updateCase(id: string, patch: Partial<TestCase>): TestCase | und
   db.prepare(
     `UPDATE test_cases SET title=@title,priority=@priority,priorityReason=@priorityReason,
      runStatus=@runStatus,hasCode=@hasCode,precondition=@precondition,expected=@expected,
-     type=@type,requirementId=@requirementId,envRef=@envRef,postSteps=@postSteps,quarantined=@quarantined,steps=@steps,code=@code WHERE id=@id`,
+     type=@type,requirementId=@requirementId,envRef=@envRef,dataKey=@dataKey,postSteps=@postSteps,quarantined=@quarantined,steps=@steps,code=@code WHERE id=@id`,
   ).run({
     ...next,
     expected: next.expected ?? "",
     requirementId: next.requirementId ?? "",
     envRef: next.envRef ?? "",
+    dataKey: next.dataKey ?? "",
     hasCode: next.hasCode ? 1 : 0,
     quarantined: next.quarantined ? 1 : 0,
     postSteps: JSON.stringify(next.postSteps ?? []),

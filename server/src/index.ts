@@ -137,6 +137,7 @@ async function executeRun(
     login?: string[]; // login-flow step templates (登录态), run before case steps
     postSteps?: string[]; // teardown/cleanup step templates, run after the assert
     resolve?: ResolveContext; // ${env.*}/${secret.*} resolution context
+    rowLabel?: string; // data-driven row label, logged for forensics
     extraHeaders?: Record<string, string>; // fixed request headers (resolved)
     query?: Record<string, string>; // fixed query-string params
     storageState?: StorageState | null; // captured login state to inject
@@ -161,6 +162,7 @@ async function executeRun(
     screenshots.push(`data:image/png;base64,${png.toString("base64")}`);
   };
   try {
+    if (opts.rowLabel) rlog(`data row ${opts.rowLabel}`);
     logs.push(`navigate → ${url}${injected ? " (injected wallet)" : wallet ? " (with MetaMask)" : ""}`);
     const dataOpts = {
       extraHeaders: opts.extraHeaders,
@@ -813,6 +815,7 @@ async function runAndPersistCase(
   const ctx: ResolveContext = {
     env: env?.vars ?? {},
     secrets: getSecretValues(c.projectId),
+    row: body?.__row, // data-driven: current row → ${row} / ${row.col}
   };
   const url = resolveText(body?.url || env?.baseUrl || project?.targetUrl || "", ctx);
   if (!url) throw new Error("no url (set an environment baseUrl or project targetUrl)");
@@ -829,10 +832,11 @@ async function runAndPersistCase(
     wallet: !!body?.wallet,
     rpcUrl: body?.rpcUrl,
     chainId: body?.chainId,
-    cacheId: c.id, // stable per case → regression re-runs replay from Midscene cache
+    cacheId: c.id + (body?.__cacheSuffix ?? ""), // per-row cache so data-driven rows don't collide
     login,
     postSteps: c.postSteps.map((s) => s.text),
     resolve: ctx,
+    rowLabel: body?.__rowLabel,
     extraHeaders: resolveMap(env?.headers ?? {}, ctx),
     query: resolveMap(env?.query ?? {}, ctx),
     storageState: useSession ? session : null,
@@ -883,7 +887,7 @@ async function runCaseWithHeal(
     attempts++;
     run = await runAndPersistCase(c, body);
     if (run.status === "passed" || attempts > maxRetries) break;
-    bustCache(c.id); // self-heal: drop the stale cached plan before the next attempt
+    bustCache(c.id + (body?.__cacheSuffix ?? "")); // self-heal: drop the stale (per-row) plan
   }
   const healed = run.status === "passed" && attempts > 1;
   updateRunHealing(run.id, attempts, healed);
@@ -892,6 +896,42 @@ async function runCaseWithHeal(
   computeFlakiness(c.id);
   updateCase(c.id, { runStatus: run.status });
   return { run, attempts, healed };
+}
+
+// Data-driven wrapper: if the case binds an env array var (dataKey) with ≥1 rows, run it
+// once per row (each row injected as ${row}/${row.col}, with its own plan cache), and
+// report the aggregate — the case passes only if EVERY row passes. Otherwise a single run.
+async function runCaseDataDriven(
+  c: TestCase,
+  body: Record<string, any>,
+  maxRetries: number,
+): Promise<{ run: RunRecord; attempts: number; healed: boolean; rows?: number; rowsPassed?: number }> {
+  const env = resolveEnvironment(c.projectId, body?.env || c.envRef);
+  const dataset = c.dataKey ? env?.vars?.[c.dataKey] : undefined;
+  const rows = Array.isArray(dataset) ? dataset : null;
+  if (!rows || !rows.length) return runCaseWithHeal(c, body, maxRetries);
+
+  let last: { run: RunRecord; attempts: number; healed: boolean } | undefined;
+  let passed = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const label = `${i + 1}/${rows.length}: ${typeof row === "object" ? JSON.stringify(row) : String(row)}`;
+    last = await runCaseWithHeal(
+      c,
+      { ...body, __row: row, __cacheSuffix: `#${i}`, __rowLabel: label },
+      maxRetries,
+    );
+    if (last.run.status === "passed") passed++;
+  }
+  const allPassed = passed === rows.length;
+  updateCase(c.id, { runStatus: allPassed ? "passed" : "failed" });
+  // The immediate API response reflects the AGGREGATE; each row's run is persisted on its own.
+  return {
+    ...last!,
+    run: { ...last!.run, status: allPassed ? "passed" : "failed" },
+    rows: rows.length,
+    rowsPassed: passed,
+  };
 }
 
 // Edit-time AI node intervention: propose a change to a case's steps or oracle from a
@@ -1045,8 +1085,8 @@ app.post("/api/cases/:id/run", async (req, res) => {
   if (!c) return res.status(404).json({ error: "case not found" });
   try {
     const maxRetries = Math.max(0, Number(req.body?.retries ?? 0));
-    const { run } = await runCaseWithHeal(c, req.body ?? {}, maxRetries);
-    res.json({ case: getCase(c.id), run });
+    const { run, rows, rowsPassed } = await runCaseDataDriven(c, req.body ?? {}, maxRetries);
+    res.json({ case: getCase(c.id), run, rows, rowsPassed });
   } catch (e) {
     updateCase(c.id, { runStatus: "failed" as RunStatus });
     res.status(500).json({ error: (e as Error).message });
@@ -1437,7 +1477,7 @@ app.post("/api/projects/:id/suite", async (req, res) => {
     cases.map((c) =>
       enqueue(async () => {
         try {
-          const { run, attempts, healed } = await runCaseWithHeal(c, req.body ?? {}, retries);
+          const { run, attempts, healed } = await runCaseDataDriven(c, req.body ?? {}, retries);
           const quarantined = !!getCase(c.id)?.quarantined;
           const outcome = run.infraError ? "error" : run.status === "passed" ? "passed" : "failed";
           addBatchRun({

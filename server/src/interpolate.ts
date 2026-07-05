@@ -2,17 +2,32 @@
 // ${secret.KEY} placeholders — never literal credentials. At run time we resolve
 // them to real values for the browser, but LOG the original template text, so a
 // plaintext secret never reaches logs, reports, or the DB.
+// One row of a data-driven dataset: a primitive (${row}) or an object (${row.col}).
+export type DataRow = string | number | boolean | Record<string, unknown>;
+
 export interface ResolveContext {
   env: Record<string, string | string[]>; // non-secret vars (safe to show); may be arrays
   secrets: Record<string, string>; // sensitive values (must be redacted)
+  row?: DataRow; // current data-driven row, if any → ${row} / ${row.col}
 }
 
-// ${env.KEY}, ${secret.KEY}, or ${env.KEY.3} (indexed element of an array var).
-const PLACEHOLDER = /\$\{(env|secret)\.([A-Za-z0-9_]+)(?:\.(\d+))?\}/g;
+// ${env.KEY}, ${secret.KEY}, ${env.KEY.3} (array element), ${row}, or ${row.col}.
+const PLACEHOLDER = /\$\{(env|secret|row)(?:\.([A-Za-z0-9_]+))?(?:\.(\d+))?\}/g;
 
 // Resolve a template to its real value (for execution).
 export function resolveText(text: string, ctx: ResolveContext): string {
-  return text.replace(PLACEHOLDER, (whole, kind: string, key: string, idx?: string) => {
+  return text.replace(PLACEHOLDER, (whole, kind: string, key?: string, idx?: string) => {
+    if (kind === "row") {
+      const row = ctx.row;
+      if (row === undefined) return whole;
+      if (typeof row === "object") {
+        if (!key) return JSON.stringify(row); // ${row} on an object → its JSON
+        const v = (row as Record<string, unknown>)[key];
+        return v === undefined ? whole : String(v); // ${row.col}
+      }
+      return key ? whole : String(row); // ${row} on a primitive; ${row.x} on a primitive → intact
+    }
+    if (!key) return whole; // env/secret require a key
     if (kind === "secret") return key in ctx.secrets ? ctx.secrets[key] : whole;
     const val = ctx.env[key];
     if (val === undefined) return whole; // leave unknown placeholders intact

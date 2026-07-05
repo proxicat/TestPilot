@@ -96,6 +96,13 @@ export const dict: Record<string, Entry> = {
     en: "No test data. Use “Ask AI · Data” below to add accounts / values / parameters.",
     ja: "テストデータなし。下部の「AI に依頼 · データ」でアカウント/値/パラメータを追加できます。",
   },
+  "cases.dataDriven": { zh: "数据驱动", en: "Data-driven", ja: "データ駆動" },
+  "cases.dataDrivenPlaceholder": { zh: "数据集变量名，如 users", en: "dataset var name, e.g. users", ja: "データセット変数名（例 users）" },
+  "cases.dataDrivenHelp": {
+    zh: "绑定环境里的数组变量：每行数据跑一次。步骤 / 断言里用 ${row}（整行）或 ${row.列名}（对象字段）。留空则单次运行。",
+    en: "Bind an array variable from the environment: runs once per row. In steps/assertions use ${row} (whole row) or ${row.col} (object field). Empty = a single run.",
+    ja: "環境の配列変数をバインド：1 行につき 1 回実行。ステップ / アサーションで ${row}（行全体）または ${row.col}（オブジェクト項目）を使用。空欄なら単一実行。",
+  },
   "cases.refineFailed": { zh: "AI 优化失败 — 请换个说法重试。", en: "AI refine failed — try rephrasing.", ja: "AI の調整に失敗しました — 表現を変えて再試行してください。" },
   "cases.refineStepsPlaceholder": { zh: "告诉 AI 如何修改这些步骤…", en: "Tell AI how to change these steps…", ja: "これらのステップの変更方法を AI に伝えてください…" },
   "cases.refineOraclePlaceholder": { zh: "告诉 AI 如何修改这条断言…", en: "Tell AI how to change this assertion…", ja: "このアサーションの変更方法を AI に伝えてください…" },
