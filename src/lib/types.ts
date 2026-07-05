@@ -2,14 +2,27 @@ export type Priority = "P0" | "P1" | "P2";
 export type RunStatus = "passed" | "failed" | "notRun" | "running";
 export type CaseType = "functional" | "negative" | "boundary" | "e2e";
 
+export interface ApiLoginConfig {
+  url: string;
+  method?: string;
+  contentType?: string;
+  body?: string;
+  headers?: Record<string, string>;
+  tokenPath?: string;
+  tokenHeader?: string;
+  tokenPrefix?: string;
+}
+
 export interface LoginFlow {
   authRequired?: boolean;
   steps?: string[];
+  apiLogin?: ApiLoginConfig | null; // API-style login config (no UI driving)
   // Captured-session summary (the blob itself never leaves the server).
   capturedAt?: string;
   hasSession?: boolean;
   sessionCookies?: number;
   sessionOrigins?: number;
+  sessionHeaders?: number;
 }
 
 export interface Environment {

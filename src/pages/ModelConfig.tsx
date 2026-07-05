@@ -927,6 +927,18 @@ function KvEditor({
   );
 }
 
+function blankApiLogin() {
+  return {
+    enabled: false,
+    url: "",
+    method: "POST",
+    contentType: "application/json",
+    body: "",
+    tokenPath: "",
+    tokenHeader: "Authorization",
+  };
+}
+
 function blankEnvForm() {
   return {
     id: undefined as string | undefined,
@@ -937,6 +949,7 @@ function blankEnvForm() {
     query: [] as VarRow[],
     authRequired: false,
     steps: "",
+    apiLogin: blankApiLogin(),
     isDefault: false,
     session: null as SessionInfo | null,
   };
@@ -953,6 +966,11 @@ function formFromEnv(env: Environment) {
     query: toRows(env.query),
     authRequired: !!env.login?.authRequired,
     steps: (env.login?.steps ?? []).join("\n"),
+    apiLogin: {
+      ...blankApiLogin(),
+      enabled: !!env.login?.apiLogin,
+      ...(env.login?.apiLogin ?? {}),
+    },
     isDefault: env.isDefault,
     session: {
       hasSession: !!env.login?.hasSession,
@@ -1070,10 +1088,11 @@ function EnvironmentsCard() {
     }
   };
 
-  const save = async () => {
-    if (!projectId || !form.name.trim()) return;
+  const save = async (): Promise<Environment | null> => {
+    if (!projectId || !form.name.trim()) return null;
     setState("saving");
     setDetail("");
+    const a = form.apiLogin;
     const login: LoginFlow = {
       authRequired: form.authRequired,
       steps: form.authRequired
@@ -1082,6 +1101,17 @@ function EnvironmentsCard() {
             .map((s) => s.trim())
             .filter(Boolean)
         : [],
+      apiLogin:
+        form.authRequired && a.enabled && a.url.trim()
+          ? {
+              url: a.url.trim(),
+              method: a.method,
+              contentType: a.contentType,
+              body: a.body,
+              tokenPath: a.tokenPath.trim() || undefined,
+              tokenHeader: a.tokenHeader.trim() || undefined,
+            }
+          : null,
     };
     try {
       const { environment } = await api.saveEnvironment(projectId, {
@@ -1101,9 +1131,35 @@ function EnvironmentsCard() {
       setSelected(environment.id);
       setForm(formFromEnv(environment));
       setState("idle");
+      return environment;
     } catch (e) {
       setState("error");
       setDetail((e as Error).message);
+      return null;
+    }
+  };
+
+  // API-style login: save the config, then call the endpoint to capture the session.
+  const [apiState, setApiState] = useState<"idle" | "running" | "error">("idle");
+  const [apiMsg, setApiMsg] = useState("");
+  const runApiLogin = async () => {
+    setApiState("running");
+    setApiMsg("");
+    const saved = await save();
+    if (!saved?.id) {
+      setApiState("error");
+      setApiMsg(t("model.captureNeedsSave"));
+      return;
+    }
+    try {
+      const r = await api.apiLogin(saved.id);
+      applySessionInfo(r.environment);
+      setEnvs((es) => es.map((e) => (e.id === r.environment.id ? r.environment : e)));
+      setSessionMsg(`${r.cookies} cookies · ${r.token ? "token ✓" : "—"}`);
+      setApiState("idle");
+    } catch (e) {
+      setApiState("error");
+      setApiMsg((e as Error).message);
     }
   };
 
@@ -1353,6 +1409,103 @@ function EnvironmentsCard() {
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* API-style login (method C): capture the session via an HTTP call, no UI driving */}
+              <div className="mt-2 rounded-md border border-border bg-background p-2.5">
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.apiLogin.enabled}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, enabled: e.target.checked } }))
+                    }
+                    className="h-3.5 w-3.5 cursor-pointer"
+                  />
+                  <Server className="h-3.5 w-3.5 text-muted-foreground" /> {t("model.apiLogin")}
+                </label>
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                  {t("model.apiLoginHelp")}
+                </p>
+                {form.apiLogin.enabled && (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex gap-1.5">
+                      <select
+                        value={form.apiLogin.method}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, method: e.target.value } }))
+                        }
+                        className="w-20 rounded border border-border bg-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option>POST</option>
+                        <option>GET</option>
+                        <option>PUT</option>
+                      </select>
+                      <input
+                        value={form.apiLogin.url}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, url: e.target.value } }))
+                        }
+                        placeholder="https://api.site.com/login"
+                        className="flex-1 rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={form.apiLogin.body}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, body: e.target.value } }))
+                      }
+                      placeholder={'{"username":"${env.USER}","password":"${secret.PASSWORD}"}'}
+                      className="w-full rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        value={form.apiLogin.tokenPath}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, tokenPath: e.target.value } }))
+                        }
+                        placeholder={t("model.apiTokenPath")}
+                        className="flex-1 rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <input
+                        value={form.apiLogin.tokenHeader}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, apiLogin: { ...f.apiLogin, tokenHeader: e.target.value } }))
+                        }
+                        placeholder="Authorization"
+                        className="w-32 rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="primary"
+                        className="bg-violet-600 text-xs hover:bg-violet-700"
+                        onClick={runApiLogin}
+                        disabled={!form.apiLogin.url.trim() || apiState === "running"}
+                      >
+                        {apiState === "running" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Server className="h-3.5 w-3.5" />
+                        )}
+                        {t("model.runApiLogin")}
+                      </Button>
+                      {apiMsg && (
+                        <span
+                          className={cn(
+                            "text-[11px]",
+                            apiState === "error"
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {apiMsg}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

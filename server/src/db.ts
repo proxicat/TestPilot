@@ -236,11 +236,26 @@ export interface TestCase {
 export interface StorageState {
   cookies: Array<Record<string, unknown>>;
   origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+  headers?: Record<string, string>; // captured auth headers (e.g. Authorization from API login)
+}
+// API-style login (method C): call the site's login endpoint directly, capture the
+// session cookie and/or a token from the response — no UI driving. Body/url may hold
+// ${env.KEY}/${secret.KEY} placeholders.
+export interface ApiLoginConfig {
+  url: string; // login endpoint
+  method?: string; // default POST
+  contentType?: string; // default application/json
+  body?: string; // request body template
+  headers?: Record<string, string>; // extra request headers for the login call
+  tokenPath?: string; // dot-path into the JSON response to the token (e.g. "data.token")
+  tokenHeader?: string; // header to inject the token into (default Authorization)
+  tokenPrefix?: string; // token value prefix (default "Bearer ")
 }
 // Environment: per-project target + non-secret vars + a reusable login flow.
 export interface LoginFlow {
   authRequired?: boolean; // when true, cases run the login steps first
   steps?: string[]; // login actions; may reference env/secret placeholders
+  apiLogin?: ApiLoginConfig; // API-style login config (alternative to UI steps)
   session?: StorageState | null; // captured login state — when present, injected + login SKIPPED
   capturedAt?: string; // when the session was captured (for staleness display)
 }

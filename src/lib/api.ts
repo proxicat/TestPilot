@@ -1,4 +1,5 @@
 import type {
+  ApiLoginConfig,
   ModelConfig,
   Project,
   TestCase,
@@ -195,7 +196,7 @@ export const api = {
       vars: Record<string, string | string[]>;
       headers: Record<string, string>;
       query: Record<string, string>;
-      login: { authRequired?: boolean; steps?: string[] };
+      login: { authRequired?: boolean; steps?: string[]; apiLogin?: ApiLoginConfig | null };
       isDefault: boolean;
     },
   ) =>
@@ -217,6 +218,15 @@ export const api = {
     }>(`/api/environments/${envId}/capture-session`, {}, 600000),
   clearSession: (envId: string) =>
     del<{ ok: true; environment: Environment }>(`/api/environments/${envId}/session`),
+  // API-style login: call the configured endpoint, capture cookies/token as the session.
+  apiLogin: (envId: string) =>
+    post<{
+      ok: true;
+      status: number;
+      cookies: number;
+      token: boolean;
+      environment: Environment;
+    }>(`/api/environments/${envId}/api-login`, {}, 30000),
 
   // ---- secrets (per project; values are write-only, never returned) ----
   getSecrets: (projectId: string) =>

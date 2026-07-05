@@ -837,7 +837,8 @@ async function runAndPersistCase(
     postSteps: c.postSteps.map((s) => s.text),
     resolve: ctx,
     rowLabel: body?.__rowLabel,
-    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    // Fixed headers + any auth header captured by API login (when the session is used).
+    extraHeaders: { ...resolveMap(env?.headers ?? {}, ctx), ...(useSession ? session?.headers ?? {} : {}) },
     query: resolveMap(env?.query ?? {}, ctx),
     storageState: useSession ? session : null,
   });
@@ -1004,7 +1005,7 @@ app.get("/api/cases/:id/debug", async (req, res) => {
   const doLogin = env?.login?.authRequired && !useSession && req.query.skipLogin !== "1";
   const loginSteps = doLogin ? env?.login?.steps ?? [] : [];
   const dataLaunch = {
-    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    extraHeaders: { ...resolveMap(env?.headers ?? {}, ctx), ...(useSession ? session0?.headers ?? {} : {}) },
     query: resolveMap(env?.query ?? {}, ctx),
     storageState: useSession ? session0 : null,
   };
@@ -1188,10 +1189,11 @@ function exploreLaunch(projectId: string): {
 } {
   const env = resolveEnvironment(projectId);
   const ctx: ResolveContext = { env: env?.vars ?? {}, secrets: getSecretValues(projectId) };
+  const session = env?.login?.session ?? null;
   return {
-    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    extraHeaders: { ...resolveMap(env?.headers ?? {}, ctx), ...(session?.headers ?? {}) },
     query: resolveMap(env?.query ?? {}, ctx),
-    storageState: env?.login?.session ?? null,
+    storageState: session,
   };
 }
 
@@ -1341,12 +1343,58 @@ function sanitizeEnv(env: Environment) {
     login: {
       authRequired: env.login?.authRequired ?? false,
       steps: env.login?.steps ?? [],
+      apiLogin: env.login?.apiLogin ?? null, // config only (contains placeholders, not secrets)
       capturedAt: env.login?.capturedAt,
       hasSession: !!s,
       sessionCookies: s?.cookies?.length ?? 0,
       sessionOrigins: s?.origins?.length ?? 0,
+      sessionHeaders: Object.keys(s?.headers ?? {}).length,
     },
   };
+}
+
+// Parse Set-Cookie response headers into Puppeteer-shaped cookie objects.
+function parseSetCookies(setCookies: string[], reqUrl: string): Array<Record<string, unknown>> {
+  const host = (() => {
+    try {
+      return new URL(reqUrl).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  const out: Array<Record<string, unknown>> = [];
+  for (const sc of setCookies) {
+    const [nv, ...attrs] = sc.split(";").map((p) => p.trim());
+    const eq = nv.indexOf("=");
+    if (eq < 0) continue;
+    const cookie: Record<string, unknown> = {
+      name: nv.slice(0, eq),
+      value: nv.slice(eq + 1),
+      path: "/",
+      domain: host,
+    };
+    for (const a of attrs) {
+      const [k, v] = a.split("=");
+      const lk = k.toLowerCase();
+      if (lk === "domain" && v) cookie.domain = v.replace(/^\./, "");
+      else if (lk === "path" && v) cookie.path = v;
+      else if (lk === "httponly") cookie.httpOnly = true;
+      else if (lk === "secure") cookie.secure = true;
+      else if (lk === "samesite" && v)
+        cookie.sameSite = v.charAt(0).toUpperCase() + v.slice(1).toLowerCase(); // Lax/Strict/None
+    }
+    out.push(cookie);
+  }
+  return out;
+}
+// Read a dot-path (e.g. "data.token") out of a parsed JSON value.
+function getJsonPath(obj: unknown, path: string): unknown {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined),
+      obj,
+    );
 }
 
 app.get("/api/projects/:id/environments", (req, res) => {
@@ -1427,6 +1475,77 @@ app.post("/api/environments/:id/capture-session", async (req, res) => {
     res.status(502).json({ error: `capture failed: ${(e as Error).message}` });
   } finally {
     await session?.cleanup?.();
+  }
+});
+
+// API-style login (method C): call the login endpoint directly, capture the session
+// cookie and/or a token (→ auth header) from the response — no UI driving. Stored as the
+// same session that runs inject + skip login. Credentials come from ${env}/${secret}.
+app.post("/api/environments/:id/api-login", async (req, res) => {
+  const env = getEnvironment(req.params.id);
+  if (!env) return res.status(404).json({ error: "environment not found" });
+  const cfg = env.login?.apiLogin;
+  if (!cfg?.url) return res.status(400).json({ error: "no API-login endpoint configured" });
+  const ctx: ResolveContext = { env: env.vars, secrets: getSecretValues(env.projectId) };
+  const secretVals = Object.values(ctx.secrets);
+  try {
+    const url = resolveText(cfg.url, ctx);
+    const method = (cfg.method || "POST").toUpperCase();
+    const headers: Record<string, string> = {
+      "content-type": cfg.contentType || "application/json",
+      ...resolveMap(cfg.headers ?? {}, ctx),
+    };
+    const body = method === "GET" || !cfg.body ? undefined : resolveText(cfg.body, ctx);
+    const resp = await fetch(url, { method, headers, body });
+
+    const setCookies =
+      typeof (resp.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+        ? (resp.headers as { getSetCookie: () => string[] }).getSetCookie()
+        : [];
+    const cookies = parseSetCookies(setCookies, url);
+
+    const capturedHeaders: Record<string, string> = {};
+    let tokenFound = false;
+    if (cfg.tokenPath) {
+      let json: unknown;
+      try {
+        json = await resp.json();
+      } catch {
+        json = undefined;
+      }
+      const token = json !== undefined ? getJsonPath(json, cfg.tokenPath) : undefined;
+      if (typeof token === "string" && token) {
+        capturedHeaders[cfg.tokenHeader || "Authorization"] = (cfg.tokenPrefix ?? "Bearer ") + token;
+        tokenFound = true;
+      }
+    }
+
+    if (!resp.ok)
+      return res.status(502).json({ error: `login endpoint returned HTTP ${resp.status}` });
+    if (!cookies.length && !tokenFound)
+      return res
+        .status(502)
+        .json({ error: "no session cookie and no token found in the login response" });
+
+    const session: StorageState = {
+      cookies,
+      origins: [],
+      headers: Object.keys(capturedHeaders).length ? capturedHeaders : undefined,
+    };
+    const capturedAt = new Date().toISOString();
+    const saved = upsertEnvironment({
+      ...env,
+      login: { ...env.login, authRequired: true, session, capturedAt },
+    });
+    res.json({
+      ok: true,
+      status: resp.status,
+      cookies: cookies.length,
+      token: tokenFound,
+      environment: sanitizeEnv(saved),
+    });
+  } catch (e) {
+    res.status(502).json({ error: `API login failed: ${redact((e as Error).message, secretVals)}` });
   }
 });
 
