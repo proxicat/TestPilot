@@ -15,6 +15,51 @@ import { resolveChainConfig, resolveViewport } from "./config.js";
 import { setupInjectedWallet } from "./injectedWallet.js";
 import type { StorageState } from "./db.js";
 
+// Apply the fixed query params to EVERY navigation (not just the entry URL) via request
+// interception: each document/navigation request's URL is rewritten to carry the params, so
+// clicks, redirects and form navigations all keep the flag (e.g. ?e2e=1). Only document
+// navigation requests are touched — sub-resources (images/xhr) are left alone. Cooperative
+// priority + a handled-guard so it coexists with any other interceptor. Midscene itself does
+// not intercept, so this is the sole handler in practice.
+async function installQueryInterception(
+  page: Page,
+  query?: Record<string, string>,
+): Promise<void> {
+  if (!query || !Object.keys(query).length) return;
+  try {
+    await page.setRequestInterception(true);
+  } catch {
+    return; // interception unavailable — the entry-URL append still applies
+  }
+  page.on("request", (req) => {
+    try {
+      if (typeof req.isInterceptResolutionHandled === "function" && req.isInterceptResolutionHandled())
+        return;
+      if (req.isNavigationRequest() && req.resourceType() === "document") {
+        const u = new URL(req.url());
+        let changed = false;
+        for (const [k, v] of Object.entries(query)) {
+          if (u.searchParams.get(k) !== v) {
+            u.searchParams.set(k, v);
+            changed = true;
+          }
+        }
+        if (changed) {
+          req.continue({ url: u.toString() }, 0);
+          return;
+        }
+      }
+      req.continue(undefined, 0);
+    } catch {
+      try {
+        req.continue(undefined, 0);
+      } catch {
+        /* already resolved by another handler */
+      }
+    }
+  });
+}
+
 // Append fixed query params to a navigation URL (e.g. ?e2e=1&feature=x).
 function appendQuery(url: string, query?: Record<string, string>): string {
   if (!query || !Object.keys(query).length) return url;
@@ -118,6 +163,7 @@ export async function launchSession(
     });
     const page = await browser.newPage();
     await page.setViewport(resolveViewport());
+    await installQueryInterception(page, opts.query);
     await page.setUserAgent(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     );
@@ -192,6 +238,7 @@ export async function launchSession(
   // Downsampled viewport (see resolveViewport): keeps the vision-model prompt small enough
   // for memory-constrained self-hosted models (MLX prefill guard). Same as the injected path.
   await page.setViewport(resolveViewport());
+  await installQueryInterception(page, opts.query);
   await applyPreNav(page, opts);
   const navUrl = appendQuery(url, opts.query);
   // domcontentloaded (not networkidle0): robust for sites with analytics/polling that

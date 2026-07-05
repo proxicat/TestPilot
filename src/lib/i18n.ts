@@ -323,9 +323,9 @@ export const dict: Record<string, Entry> = {
   },
   "model.queryParams": { zh: "固定 Query 参数", en: "Fixed query params", ja: "固定クエリパラメータ" },
   "model.queryHelp": {
-    zh: "追加到每次导航的 URL（如灰度开关 ?e2e=1）。值可用 ${env.KEY}。",
-    en: "Appended to every navigation URL (e.g. a feature flag ?e2e=1). Values may use ${env.KEY}.",
-    ja: "毎ナビゲーションの URL に追加（例：フィーチャーフラグ ?e2e=1）。値に ${env.KEY} 使用可。",
+    zh: "追加到每次页面导航（点击 / 跳转 / 表单）发往服务器的 URL —— 用于过服务端校验（如灰度 ?e2e=1）；入口页地址栏也会带上。值可用 ${env.KEY}。",
+    en: "Added to every page navigation the server receives (clicks, redirects, forms) — for server-side checks (e.g. ?e2e=1); also in the entry-page URL. Values may use ${env.KEY}.",
+    ja: "各ページ遷移（クリック / リダイレクト / フォーム）でサーバーが受け取る URL に追加 —— サーバー側チェック用（例 ?e2e=1）。入口ページの URL にも付与。値に ${env.KEY} 使用可。",
   },
   "model.session": { zh: "登录态（缓存会话）", en: "Login state (cached session)", ja: "ログイン状態（キャッシュセッション）" },
   "model.sessionHelp": {
