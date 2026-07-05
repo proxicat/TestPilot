@@ -261,8 +261,6 @@ export function ModelConfigPage() {
             </pre>
           </div>
 
-          <ChainConfigCard />
-
           <div className="pt-2">
             <h2 className="font-display text-base font-medium text-foreground">
               {t("model.envsSecrets")}
@@ -695,124 +693,6 @@ function PromptsCard({
           <span className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
             <AlertTriangle className="h-4 w-4" /> {detail}
           </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Chain / RPC config for the injected-wallet dapp-testing capability. Reads/writes the
-// backend's runtime chain config (/api/config); point it at a local fork, Tenderly, etc.
-function ChainConfigCard() {
-  const t = useT();
-  const [rpcUrl, setRpcUrl] = useState("");
-  const [chainId, setChainId] = useState<number>(1);
-  const [account, setAccount] = useState<string>("");
-  const [state, setState] = useState<"loading" | "idle" | "saving" | "saved" | "error">(
-    "loading",
-  );
-  const [detail, setDetail] = useState("");
-
-  useEffect(() => {
-    api
-      .getConfig()
-      .then((c) => {
-        setRpcUrl(c.chain.rpcUrl);
-        setChainId(c.chain.chainId);
-        setAccount(c.account);
-        setState("idle");
-      })
-      .catch(() => {
-        setState("error");
-        setDetail(t("model.chainOffline"));
-      });
-  }, []);
-
-  const save = async () => {
-    setState("saving");
-    try {
-      const c = await api.saveConfig({ rpcUrl, chainId });
-      setRpcUrl(c.chain.rpcUrl);
-      setChainId(c.chain.chainId);
-      setState("saved");
-      setDetail("");
-      window.setTimeout(() => setState("idle"), 1500);
-    } catch (e) {
-      setState("error");
-      setDetail((e as Error).message);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-1 flex items-center gap-1.5">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h2 className="font-display text-sm font-medium text-foreground">
-          {t("model.chainRpc")}
-        </h2>
-      </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        {t("model.chainHelp")}
-      </p>
-
-      <div className="space-y-3">
-        <div>
-          <label
-            htmlFor="rpcUrl"
-            className="mb-1 block text-xs text-muted-foreground"
-          >
-            {t("model.rpcUrl")}
-          </label>
-          <input
-            id="rpcUrl"
-            type="text"
-            value={rpcUrl}
-            placeholder="http://127.0.0.1:8545"
-            onChange={(e) => setRpcUrl(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="chainId"
-            className="mb-1 block text-xs text-muted-foreground"
-          >
-            {t("model.chainId")}
-          </label>
-          <input
-            id="chainId"
-            type="number"
-            value={chainId}
-            onChange={(e) => setChainId(Number(e.target.value))}
-            className="w-40 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-
-        <div className="flex items-center gap-3 pt-1">
-          <Button
-            variant="primary"
-            onClick={save}
-            disabled={state === "saving" || state === "loading"}
-          >
-            {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {t("model.saveChainConfig")}
-          </Button>
-          {state === "saved" && (
-            <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-              <CheckCircle className="h-4 w-4" /> {t("model.saved")}
-            </span>
-          )}
-          {state === "error" && (
-            <span className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
-              <AlertTriangle className="h-4 w-4" /> {detail}
-            </span>
-          )}
-        </div>
-
-        {account && (
-          <p className="pt-1 font-mono text-[11px] text-muted-foreground">
-            test wallet: {account}
-          </p>
         )}
       </div>
     </div>

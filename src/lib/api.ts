@@ -116,6 +116,45 @@ export const api = {
   saveConfig: (chain: ChainConfig) =>
     post<{ chain: ChainConfig; account: string }>("/api/config", chain, 8000),
 
+  // ---- Web3 / dapp testing ----
+  getHealth: async () => {
+    const res = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as {
+      ok: boolean;
+      walletInstalled: boolean;
+      walletOnboarded: boolean;
+      testAccount?: string;
+      chain: ChainConfig;
+    };
+  },
+  // Injected-wallet proof: open a dapp with a virtual wallet, connect, send a REAL tx,
+  // verify the on-chain receipt. No model, no MetaMask. ~30-60s.
+  verifyDapp: (opts: { url?: string; rpcUrl?: string; chainId?: number } = {}) =>
+    post<{
+      account: string;
+      chain: ChainConfig;
+      connect: string;
+      tx: string;
+      mined: boolean;
+      txStatus?: string;
+      block?: string;
+      screenshot?: string;
+      error?: string;
+    }>("/api/dapp/verify", opts, 120000),
+  // MetaMask extension check: launch with the extension, screenshot its UI.
+  walletCheck: () =>
+    post<{
+      loaded: boolean;
+      walletId?: string;
+      onboarded?: boolean;
+      unlocked?: boolean;
+      account?: string;
+      screenshot?: string;
+      detail?: string;
+      error?: string;
+    }>("/api/wallet/check", {}, 60000),
+
   runCase: (payload: { url: string; steps: string[]; expected: string }) =>
     post<{
       status: "passed" | "failed";

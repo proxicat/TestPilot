@@ -7,6 +7,7 @@ import {
   ListChecks,
   Play,
   Cpu,
+  Blocks,
   Rocket,
   TrendingUp,
   PanelLeftClose,
@@ -219,6 +220,22 @@ export function Sidebar() {
         >
           <Cpu className="h-4 w-4 flex-shrink-0" />
           {!collapsed && t("nav.model")}
+        </NavLink>
+
+        {/* Global: Web3 / dapp testing config (footer, both levels) */}
+        <NavLink
+          to="/chain"
+          title={collapsed ? t("nav.chain") : undefined}
+          className={({ isActive }) =>
+            cn(
+              "flex items-center rounded-md py-1.5 text-sm transition-colors",
+              collapsed ? "justify-center px-0" : "gap-2.5 px-2",
+              isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
+            )
+          }
+        >
+          <Blocks className="h-4 w-4 flex-shrink-0" />
+          {!collapsed && t("nav.chain")}
         </NavLink>
 
         <AppControls collapsed={collapsed} />
