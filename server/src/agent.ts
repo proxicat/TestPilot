@@ -189,7 +189,9 @@ export async function launchSession(
   }
 
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
+  // Downsampled viewport (see resolveViewport): keeps the vision-model prompt small enough
+  // for memory-constrained self-hosted models (MLX prefill guard). Same as the injected path.
+  await page.setViewport(resolveViewport());
   await applyPreNav(page, opts);
   const navUrl = appendQuery(url, opts.query);
   // domcontentloaded (not networkidle0): robust for sites with analytics/polling that
