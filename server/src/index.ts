@@ -1162,12 +1162,29 @@ interface Flow {
   steps: string[];
   expected?: string;
   type?: string;
+  // Dapp explore: the model's suggested on-chain check for a state-changing flow.
+  chain?: { kind?: string; op?: string; token?: string; decimals?: number; note?: string };
 }
 function asFlows(data: unknown): Flow[] {
   const arr = Array.isArray(data)
     ? data
     : ((data as { flows?: unknown[] })?.flows ?? []);
   return (arr as Flow[]).filter((f) => f && f.title);
+}
+// Map a dapp flow's `chain` hint → a concrete on-chain assertion for the case.
+function flowChainAssertions(f: Flow): ChainAssertion[] {
+  const c = f.chain;
+  if (!c || !c.kind) return [];
+  const op = (["increased", "decreased", "changed", "gte", "lte", "eq"].includes(c.op ?? "")
+    ? c.op
+    : "changed") as ChainAssertion["op"];
+  const kind: ChainAssertion["kind"] = c.kind === "erc20Balance" ? "erc20Balance" : "nativeBalance";
+  const a: ChainAssertion = { kind, op, label: c.note };
+  if (kind === "erc20Balance" && c.token && /^0x[a-fA-F0-9]{40}$/.test(c.token)) {
+    a.token = c.token;
+    a.decimals = typeof c.decimals === "number" ? c.decimals : 18;
+  }
+  return [a];
 }
 
 // Explore a project's site and persist the discovered flows as cases.
@@ -1178,14 +1195,17 @@ app.post("/api/projects/:id/explore", async (req, res) => {
   if (!project) return res.status(404).json({ error: "project not found" });
   const url = req.body?.url || project.targetUrl;
   const deep = !!req.body?.deep;
+  const web3 = !!req.body?.web3;
   const explLog: string[] = [];
   let session;
   try {
-    const { explore, exploreDeepPrefix } = getSettings().prompts;
+    const { explore, exploreDeepPrefix, exploreDapp } = getSettings().prompts;
+    const explorePrompt = web3 ? exploreDapp : explore;
     // Force the model's flow text into the UI language when the global toggle is on.
     const dir = langDirective(req.body?.lang);
-    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id) });
-    const collected: Flow[] = asFlows(await session.agent.aiQuery(explore + dir));
+    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id, web3) });
+    if (web3) await new Promise((r) => setTimeout(r, 4000));
+    const collected: Flow[] = asFlows(await session.agent.aiQuery(explorePrompt + dir));
     explLog.push(`entry page → ${collected.length} flows`);
 
     if (deep) {
@@ -1195,7 +1215,7 @@ app.post("/api/projects/:id/explore", async (req, res) => {
             "this page; otherwise click the primary button to enter the application.",
         );
         await new Promise((r) => setTimeout(r, 1500));
-        const deeper = asFlows(await session.agent.aiQuery(exploreDeepPrefix + explore + dir));
+        const deeper = asFlows(await session.agent.aiQuery(exploreDeepPrefix + explorePrompt + dir));
         collected.push(...deeper);
         explLog.push(`advanced one screen → ${deeper.length} more flows`);
       } catch (e) {
@@ -1218,6 +1238,8 @@ app.post("/api/projects/:id/explore", async (req, res) => {
           expected: f.expected || "",
           type: (CASE_TYPES.has(f.type ?? "") ? f.type : "functional") as TestCase["type"],
           steps: (f.steps || []).map((t, i) => ({ order: i + 1, text: t })),
+          web3Mode: web3 ? "injected" : "",
+          chainAssertions: web3 ? flowChainAssertions(f) : [],
         }),
       );
     }
@@ -1232,19 +1254,30 @@ app.post("/api/projects/:id/explore", async (req, res) => {
 
 // Data-binding launch opts for exploration: apply the project default env's fixed headers,
 // query params, and captured session so a gated / behind-login site can still be explored.
-function exploreLaunch(projectId: string): {
+function exploreLaunch(
+  projectId: string,
+  web3 = false,
+): {
   extraHeaders: Record<string, string>;
   query: Record<string, string>;
   storageState: StorageState | null;
+  injected?: boolean;
+  rpcUrl?: string;
+  chainId?: number;
 } {
   const env = resolveEnvironment(projectId);
   const ctx: ResolveContext = { env: env?.vars ?? {}, secrets: getSecretValues(projectId) };
   const session = env?.login?.session ?? null;
-  return {
+  const base = {
     extraHeaders: { ...resolveMap(env?.headers ?? {}, ctx), ...(session?.headers ?? {}) },
     query: resolveMap(env?.query ?? {}, ctx),
     storageState: session,
   };
+  // Dapp explore: inject the wallet so the dapp connects + shows real state while the
+  // model plans (chain/RPC from the global Web3 config).
+  if (!web3) return base;
+  const chain = resolveChainConfig();
+  return { ...base, injected: true, rpcUrl: chain.rpcUrl, chainId: chain.chainId };
 }
 
 // Streaming explore (SSE): the same planning as POST /explore, but pushes the LIVE page
@@ -1267,6 +1300,7 @@ app.get("/api/projects/:id/explore/stream", async (req, res) => {
 
   const url = String(req.query.url || "") || project.targetUrl;
   const deep = req.query.deep === "1";
+  const web3 = req.query.web3 === "1";
   const lang = String(req.query.lang || "");
 
   let session: Awaited<ReturnType<typeof launchSession>> | undefined;
@@ -1303,14 +1337,17 @@ app.get("/api/projects/:id/explore/stream", async (req, res) => {
   try {
     if (!url) throw new Error("no url (set a project targetUrl)");
     send({ type: "start", url });
-    const { explore, exploreDeepPrefix } = getSettings().prompts;
+    const { explore, exploreDeepPrefix, exploreDapp } = getSettings().prompts;
+    const explorePrompt = web3 ? exploreDapp : explore;
     const dir = langDirective(lang);
-    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id) });
+    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id, web3) });
     send({ type: "navigated", screenshot: await jpeg() });
-    send({ type: "log", message: `Analyzing ${url}…`, kind: "info" });
+    send({ type: "log", message: `Analyzing ${url}${web3 ? " (dapp mode — wallet injected)" : ""}…`, kind: "info" });
 
+    // Dapp: give the app a moment to detect the injected wallet + render connected state.
+    if (web3) await new Promise((r) => setTimeout(r, 4000));
     beat();
-    const collected: Flow[] = asFlows(await session.agent.aiQuery(explore + dir));
+    const collected: Flow[] = asFlows(await session.agent.aiQuery(explorePrompt + dir));
     stopHb();
     if (closed) return;
     send({ type: "log", message: `entry page → ${collected.length} flows`, kind: "info" });
@@ -1325,7 +1362,7 @@ app.get("/api/projects/:id/explore/stream", async (req, res) => {
         await new Promise((r) => setTimeout(r, 1500));
         send({ type: "navigated", screenshot: await jpeg() });
         beat();
-        const deeper = asFlows(await session.agent.aiQuery(exploreDeepPrefix + explore + dir));
+        const deeper = asFlows(await session.agent.aiQuery(exploreDeepPrefix + explorePrompt + dir));
         stopHb();
         collected.push(...deeper);
         send({ type: "log", message: `advanced one screen → ${deeper.length} more flows`, kind: "info" });
@@ -1350,6 +1387,8 @@ app.get("/api/projects/:id/explore/stream", async (req, res) => {
         expected: f.expected || "",
         type: (CASE_TYPES.has(f.type ?? "") ? f.type : "functional") as TestCase["type"],
         steps: (f.steps || []).map((t, i) => ({ order: i + 1, text: t })),
+        web3Mode: web3 ? "injected" : "",
+        chainAssertions: web3 ? flowChainAssertions(f) : [],
       });
       count++;
       send({ type: "flow", case: created });

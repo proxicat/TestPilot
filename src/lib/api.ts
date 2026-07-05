@@ -93,6 +93,7 @@ export interface ChainConfig {
 export type PromptTemplates = {
   explore: string;
   exploreDeepPrefix: string;
+  exploreDapp: string;
   generateCode: string;
 };
 export type AppSettings = {

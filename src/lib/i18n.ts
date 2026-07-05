@@ -466,6 +466,12 @@ export const dict: Record<string, Entry> = {
     en: "Prefix prepended to the explore prompt during a deep crawl.",
     ja: "ディープクロール時に探索プロンプトの前に付加される接頭辞。",
   },
+  "model.promptExploreDapp": { zh: "Dapp 探索提示词", en: "Dapp explore prompt", ja: "Dapp 探索プロンプト" },
+  "model.promptExploreDappDesc": {
+    zh: "「Dapp 模式」探索时使用:按 Web3 方法学生成连接/交易/断言用例,并附带链上校验(chain 字段)。",
+    en: "Used in 'Dapp mode' exploration: generates Web3-methodology connect/tx/assert cases with on-chain checks (the chain field).",
+    ja: "「Dapp モード」探索で使用：Web3 方法論の接続/取引/検証ケースをオンチェーン検証（chain フィールド）付きで生成。",
+  },
   "model.promptGenerateCode": { zh: "代码生成提示词", en: "Code-generation prompt", ja: "コード生成プロンプト" },
   "model.promptGenerateCodeDesc": {
     zh: "从某个测试用例的步骤生成可执行代码时使用的提示词。",
@@ -478,6 +484,12 @@ export const dict: Record<string, Entry> = {
 
   // ---- explore ----
   "explore.deepCrawl": { zh: "深度爬取", en: "Deep crawl", ja: "ディープクロール" },
+  "explore.web3": { zh: "Dapp 模式", en: "Dapp mode", ja: "Dapp モード" },
+  "explore.web3Title": {
+    zh: "把站点当 Web3 dapp 探索:注入钱包连接,按 dapp 方法学生成用例(连接/交易/断言),并附带链上校验。",
+    en: "Explore the site as a Web3 dapp: inject + connect a wallet, generate dapp-methodology cases (connect/tx/assert) pre-wired with on-chain checks.",
+    ja: "サイトを Web3 dapp として探索：ウォレットを注入・接続し、dapp 方法論のケース（接続/取引/検証）をオンチェーン検証付きで生成。",
+  },
   "explore.deepCrawlTitle": { zh: "登录 / 前进一屏并重新规划，让登录后的流程基于真实 UI", en: "Log in / advance one screen and re-plan, so post-login flows are grounded in the real UI", ja: "ログイン / 1 画面進めて再計画し、ログイン後のフローを実際の UI に基づかせます" },
   "explore.exploring": { zh: "探索中…", en: "Exploring…", ja: "探索中…" },
   "explore.agentExploring": { zh: "智能体探索中…", en: "Agent exploring…", ja: "エージェントが探索中…" },

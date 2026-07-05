@@ -53,14 +53,41 @@ const DEFAULT_GENERATE_CODE =
   "Available calls: await agent.aiAction('<natural language step>'), await agent.aiAssert('<condition>'), await agent.aiInput('<text>', '<field description>').\n" +
   "Return ONLY the body statements (no imports, no function wrapper, no markdown fences).";
 
+// Dapp/Web3 exploration methodology. The wallet is ALREADY injected + connected during a
+// web3 explore, so flows must not include wallet-popup steps. Each state-changing flow also
+// gets a `chain` hint → an on-chain assertion, so explored dapp cases verify real state.
+const DEFAULT_EXPLORE_DAPP =
+  "You are a senior Web3 / dapp QA engineer. This page is a decentralized app (dapp) " +
+  "connected to a crypto wallet that AUTO-CONFIRMS connect/sign/transactions — so do NOT " +
+  "add any wallet-popup / MetaMask-confirm steps; write only the dapp's own UI actions. " +
+  "Apply dapp test-design methodology and return the user flows worth testing as an array " +
+  'named "flows". Cover (a) core value flows (swap, mint, stake, deposit, transfer, ' +
+  "approve) AND (b) deliberate NEGATIVE / BOUNDARY cases (insufficient balance, zero / max " +
+  "amount, wrong network, slippage, unsupported token). Each flow object has: " +
+  "title (string); " +
+  'type ("functional" | "negative" | "boundary" | "e2e"); ' +
+  'priority ("P0" for swap/approve/transfer/core value moves; "P1" secondary; "P2" minor); ' +
+  "reason (string — what it verifies); " +
+  "steps (array of short, concrete dapp-UI actions ONLY — NO wallet popups); " +
+  "expected (string — ONE concrete, UI-checkable assertion of the outcome); " +
+  "and — ONLY WHEN the flow changes on-chain state — a chain object for on-chain " +
+  'verification: chain = { "kind": "nativeBalance" | "erc20Balance", "op": "increased" | ' +
+  '"decreased" | "changed", "token": "<0x mainnet address, ONLY if you are confident>", ' +
+  '"decimals": <number>, "note": "<short label>" }. Use nativeBalance "decreased" for flows ' +
+  'that spend ETH (ETH swaps, sends); use erc20Balance "increased" with a known token ' +
+  "address for receiving a token; OMIT chain for read-only flows. Return 6-10 DISTINCT " +
+  "flows including at least 2 negative/boundary cases.";
+
 export interface Prompts {
   explore: string;
   exploreDeepPrefix: string;
+  exploreDapp: string;
   generateCode: string;
 }
 export const DEFAULT_PROMPTS: Prompts = {
   explore: DEFAULT_EXPLORE,
   exploreDeepPrefix: DEFAULT_EXPLORE_DEEP_PREFIX,
+  exploreDapp: DEFAULT_EXPLORE_DAPP,
   generateCode: DEFAULT_GENERATE_CODE,
 };
 

@@ -1,4 +1,4 @@
-import { Radar, Globe, Loader2, Sparkles, StopCircle, ArrowRight } from "lucide-react";
+import { Radar, Globe, Loader2, Sparkles, StopCircle, ArrowRight, Blocks } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { TopBar } from "@/components/TopBar";
 import { Button, PriorityBadge } from "@/components/ui";
@@ -13,6 +13,8 @@ export function ExplorePage() {
   const setExploreUrl = useStore((s) => s.setExploreUrl);
   const exploreDeep = useStore((s) => s.exploreDeep);
   const setExploreDeep = useStore((s) => s.setExploreDeep);
+  const exploreWeb3 = useStore((s) => s.exploreWeb3);
+  const setExploreWeb3 = useStore((s) => s.setExploreWeb3);
   const exploring = useStore((s) => s.exploring);
   const startExplore = useStore((s) => s.startExplore);
   const stopExplore = useStore((s) => s.stopExplore);
@@ -63,6 +65,19 @@ export function ExplorePage() {
                   className="cursor-pointer"
                 />
                 {t("explore.deepCrawl")}
+              </label>
+              <label
+                className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+                title={t("explore.web3Title")}
+              >
+                <input
+                  type="checkbox"
+                  checked={exploreWeb3}
+                  onChange={(e) => setExploreWeb3(e.target.checked)}
+                  className="cursor-pointer"
+                />
+                <Blocks className="h-3.5 w-3.5 text-violet-500" />
+                {t("explore.web3")}
               </label>
               <Button
                 variant="success"

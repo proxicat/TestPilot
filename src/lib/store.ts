@@ -34,6 +34,7 @@ interface StoreState {
   exploreLogs: ExploreLog[];
   exploreUrl: string;
   exploreDeep: boolean;
+  exploreWeb3: boolean;
   exploreScreenshot: string;
   exploreLastCount: number;
   flakiness: Flakiness[];
@@ -42,6 +43,7 @@ interface StoreState {
   loadFlakiness: () => Promise<void>;
   setQuarantine: (id: string, quarantined: boolean) => Promise<void>;
   setExploreDeep: (v: boolean) => void;
+  setExploreWeb3: (v: boolean) => void;
   selectProject: (id: string) => Promise<void>;
   exitProject: () => void;
   createProject: (name: string, targetUrl: string) => Promise<void>;
@@ -80,6 +82,7 @@ export const useStore = create<StoreState>((set, get) => ({
   exploreLogs: [],
   exploreUrl: "",
   exploreDeep: false,
+  exploreWeb3: false,
   exploreScreenshot: "",
   exploreLastCount: 0,
   flakiness: [],
@@ -245,6 +248,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setExploreUrl: (url) => set({ exploreUrl: url }),
   setExploreDeep: (v) => set({ exploreDeep: v }),
+  setExploreWeb3: (v) => set({ exploreWeb3: v }),
 
   startExplore: async () => {
     if (get().exploring) return;
@@ -260,11 +264,16 @@ export const useStore = create<StoreState>((set, get) => ({
 
     set({ exploring: true, exploreLogs: [], exploreScreenshot: "", exploreLastCount: 0 });
     const deep = get().exploreDeep;
-    pushLog(`Exploring ${url} with Midscene${deep ? " (deep crawl)" : ""}…`, "info");
+    const web3 = get().exploreWeb3;
+    pushLog(
+      `Exploring ${url} with Midscene${deep ? " (deep crawl)" : ""}${web3 ? " (dapp mode)" : ""}…`,
+      "info",
+    );
 
     const qs = new URLSearchParams({
       url,
       deep: deep ? "1" : "0",
+      web3: web3 ? "1" : "0",
       lang: usePrefs.getState().lang,
     }).toString();
     const es = new EventSource(`${API_BASE}/api/projects/${pid}/explore/stream?${qs}`);

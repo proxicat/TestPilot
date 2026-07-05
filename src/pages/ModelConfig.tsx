@@ -298,6 +298,7 @@ function DebugPromptsCards() {
   const [prompts, setPrompts] = useState<PromptTemplates>({
     explore: "",
     exploreDeepPrefix: "",
+    exploreDapp: "",
     generateCode: "",
   });
 
@@ -555,6 +556,11 @@ const PROMPT_KEYS: {
     key: "exploreDeepPrefix",
     label: "model.promptDeepPrefix",
     desc: "model.promptDeepPrefixDesc",
+  },
+  {
+    key: "exploreDapp",
+    label: "model.promptExploreDapp",
+    desc: "model.promptExploreDappDesc",
   },
   {
     key: "generateCode",
