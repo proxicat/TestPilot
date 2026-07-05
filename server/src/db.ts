@@ -435,6 +435,26 @@ export function createProject(name: string, targetUrl: string): Project {
   );
   return p;
 }
+// Delete a project and everything under it (cases, runs, baselines, envs, secrets, batches).
+export function deleteProject(id: string): void {
+  const caseIds = (db.prepare("SELECT id FROM test_cases WHERE projectId=?").all(id) as { id: string }[]).map((r) => r.id);
+  const batchIds = (db.prepare("SELECT id FROM batches WHERE projectId=?").all(id) as { id: string }[]).map((r) => r.id);
+  db.transaction(() => {
+    for (const cid of caseIds) {
+      db.prepare("DELETE FROM runs WHERE caseId=?").run(cid);
+      db.prepare("DELETE FROM baselines WHERE caseId=?").run(cid);
+      db.prepare("DELETE FROM perf_baselines WHERE caseId=?").run(cid);
+      db.prepare("DELETE FROM flakiness WHERE caseId=?").run(cid);
+      db.prepare("DELETE FROM batch_runs WHERE caseId=?").run(cid);
+    }
+    for (const bid of batchIds) db.prepare("DELETE FROM batch_runs WHERE batchId=?").run(bid);
+    db.prepare("DELETE FROM batches WHERE projectId=?").run(id);
+    db.prepare("DELETE FROM environments WHERE projectId=?").run(id);
+    db.prepare("DELETE FROM secrets WHERE projectId=?").run(id);
+    db.prepare("DELETE FROM test_cases WHERE projectId=?").run(id);
+    db.prepare("DELETE FROM projects WHERE id=?").run(id);
+  })();
+}
 
 /* ---- cases ---- */
 export const listCases = (projectId?: string): TestCase[] =>

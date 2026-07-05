@@ -23,6 +23,7 @@ import {
   listProjects,
   getProject,
   createProject,
+  deleteProject,
   listCases,
   getCase,
   createCase,
@@ -721,6 +722,11 @@ app.post("/api/projects", (req, res) => {
   const { name, targetUrl } = req.body ?? {};
   if (!name || !targetUrl) return res.status(400).json({ error: "name and targetUrl required" });
   res.json({ project: createProject(String(name), String(targetUrl)) });
+});
+app.delete("/api/projects/:id", (req, res) => {
+  if (!getProject(req.params.id)) return res.status(404).json({ error: "project not found" });
+  deleteProject(req.params.id);
+  res.json({ ok: true });
 });
 
 // One-click Uniswap dapp-testing example: a project pointed at the real Uniswap app with

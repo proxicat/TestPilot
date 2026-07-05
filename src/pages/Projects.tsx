@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Globe, ListChecks, Plus, ChevronRight, Rocket, Loader2, Blocks } from "lucide-react";
+import { Globe, ListChecks, Plus, ChevronRight, Rocket, Loader2, Blocks, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui";
@@ -23,9 +23,22 @@ export function ProjectsPage() {
   const [busy, setBusy] = useState(false);
   const [exBusy, setExBusy] = useState(false);
 
+  const exitProject = useStore((s) => s.exitProject);
+  const [delId, setDelId] = useState<string | null>(null);
   const open = async (id: string) => {
     await selectProject(id);
     navigate("/cases");
+  };
+  const remove = async (id: string) => {
+    setDelId(id);
+    try {
+      await api.deleteProject(id);
+      if (id === activeId) exitProject();
+      await loadData();
+    } catch {
+      /* backend offline */
+    }
+    setDelId(null);
   };
   // One-click Uniswap dapp example: create (or reuse) the sample project + cases, then open it.
   const tryDappExample = async () => {
@@ -137,11 +150,11 @@ export function ProjectsPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {projects.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => void open(p.id)}
-                className="group cursor-pointer rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30"
-              >
+              <div key={p.id} className="group relative">
+                <button
+                  onClick={() => void open(p.id)}
+                  className="w-full cursor-pointer rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30"
+                >
                 <div className="mb-3 flex items-center gap-2">
                   <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
                     <Globe className="h-4 w-4 text-muted-foreground" />
@@ -166,7 +179,24 @@ export function ProjectsPage() {
                     </span>
                   )}
                 </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(t("projects.deleteConfirm").replace("{name}", p.name)))
+                      void remove(p.id);
+                  }}
+                  disabled={delId === p.id}
+                  aria-label="Delete project"
+                  title={t("common.delete")}
+                  className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-red-950"
+                >
+                  {delId === p.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
             ))}
           </div>
         )}

@@ -186,6 +186,7 @@ export const api = {
   getProjects: () => get<{ projects: Project[] }>("/api/projects"),
   createProject: (name: string, targetUrl: string) =>
     post<{ project: Project }>("/api/projects", { name, targetUrl }, 8000),
+  deleteProject: (id: string) => del<{ ok: true }>(`/api/projects/${id}`),
   getCases: (projectId?: string) =>
     get<{ cases: TestCase[] }>(`/api/cases${projectId ? `?projectId=${projectId}` : ""}`),
   // Runs are project-scoped (like cases/suite/trends). Pass caseId for a single case,
