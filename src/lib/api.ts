@@ -218,6 +218,13 @@ export const api = {
     }>(`/api/environments/${envId}/capture-session`, {}, 600000),
   clearSession: (envId: string) =>
     del<{ ok: true; environment: Environment }>(`/api/environments/${envId}/session`),
+  // Paste a session directly: a cookie string or a storageState JSON.
+  setSession: (envId: string, raw: string) =>
+    post<{ ok: true; cookies: number; origins: number; environment: Environment }>(
+      `/api/environments/${envId}/set-session`,
+      { raw },
+      8000,
+    ),
   // API-style login: call the configured endpoint, capture cookies/token as the session.
   apiLogin: (envId: string) =>
     post<{

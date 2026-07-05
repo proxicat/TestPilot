@@ -347,6 +347,18 @@ export const dict: Record<string, Entry> = {
   },
   "model.apiTokenPath": { zh: "token 的 JSON 路径，如 accessToken（可选）", en: "token JSON path, e.g. accessToken (optional)", ja: "token の JSON パス（例 accessToken、任意）" },
   "model.runApiLogin": { zh: "通过 API 登录", en: "Log in via API", ja: "API でログイン" },
+  "model.pasteSession": { zh: "手贴会话（cookie / storageState）", en: "Paste session (cookie / storageState)", ja: "セッションを貼り付け（cookie / storageState）" },
+  "model.pasteSessionPlaceholder": {
+    zh: "粘贴 Cookie 串（name=value; name2=value2）或 Playwright storageState JSON（{\"cookies\":[…],\"origins\":[…]}）",
+    en: 'Paste a Cookie string (name=value; name2=value2) or a Playwright storageState JSON ({"cookies":[…],"origins":[…]})',
+    ja: "Cookie 文字列（name=value; name2=value2）または Playwright storageState JSON（{\"cookies\":[…],\"origins\":[…]}）を貼り付け",
+  },
+  "model.pasteSessionHelp": {
+    zh: "从浏览器 DevTools 拷贝已登录的 cookie / storageState 直接用，无需跑登录。",
+    en: "Use an already-logged-in cookie / storageState copied from browser DevTools — no login run needed.",
+    ja: "ブラウザの DevTools からコピーしたログイン済みの cookie / storageState をそのまま使用 — ログイン実行不要。",
+  },
+  "model.applySession": { zh: "应用会话", en: "Apply session", ja: "セッションを適用" },
   "model.requiresLogin": { zh: "需要登录态", en: "Requires login (登录态)", ja: "ログインが必要（登录态）" },
   "model.loginFlow": { zh: "登录流程 — 每行一个自然语言步骤", en: "Login flow — one natural-language step per line", ja: "ログインフロー — 1 行につき 1 つの自然言語ステップ" },
   "model.defaultEnvironment": { zh: "默认环境", en: "Default environment", ja: "デフォルト環境" },

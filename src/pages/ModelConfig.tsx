@@ -16,6 +16,7 @@ import {
   RotateCcw,
   RefreshCw,
   Languages,
+  ClipboardPaste,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui";
@@ -1088,6 +1089,32 @@ function EnvironmentsCard() {
     }
   };
 
+  // Paste a session directly (cookie string or storageState JSON).
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const applyPaste = async () => {
+    if (!form.id) {
+      setSessionState("error");
+      setSessionMsg(t("model.captureNeedsSave"));
+      return;
+    }
+    if (!pasteText.trim()) return;
+    setSessionState("capturing");
+    setSessionMsg("");
+    try {
+      const r = await api.setSession(form.id, pasteText.trim());
+      applySessionInfo(r.environment);
+      setEnvs((es) => es.map((e) => (e.id === r.environment.id ? r.environment : e)));
+      setSessionMsg(`${r.cookies} cookies · ${r.origins} origins`);
+      setPasteText("");
+      setPasteOpen(false);
+      setSessionState("idle");
+    } catch (e) {
+      setSessionState("error");
+      setSessionMsg((e as Error).message);
+    }
+  };
+
   const save = async (): Promise<Environment | null> => {
     if (!projectId || !form.name.trim()) return null;
     setState("saving");
@@ -1407,6 +1434,40 @@ function EnvironmentsCard() {
                     >
                       {sessionMsg}
                     </span>
+                  )}
+                </div>
+
+                {/* Paste a session directly (method B): a cookie string or storageState JSON */}
+                <div className="mt-2 border-t border-border pt-2">
+                  <button
+                    onClick={() => setPasteOpen((o) => !o)}
+                    className="flex cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    <ClipboardPaste className="h-3 w-3" /> {t("model.pasteSession")}
+                  </button>
+                  {pasteOpen && (
+                    <div className="mt-1.5">
+                      <textarea
+                        rows={3}
+                        value={pasteText}
+                        onChange={(e) => setPasteText(e.target.value)}
+                        placeholder={t("model.pasteSessionPlaceholder")}
+                        className="w-full rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="primary"
+                          className="text-xs"
+                          onClick={applyPaste}
+                          disabled={!pasteText.trim() || sessionState === "capturing"}
+                        >
+                          {t("model.applySession")}
+                        </Button>
+                        <span className="text-[11px] text-muted-foreground">
+                          {t("model.pasteSessionHelp")}
+                        </span>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>

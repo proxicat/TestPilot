@@ -1549,6 +1549,83 @@ app.post("/api/environments/:id/api-login", async (req, res) => {
   }
 });
 
+// Normalize a pasted cookie array into Puppeteer-shaped cookies (fill domain/path/sameSite).
+function normalizeCookies(list: unknown[], host: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const c of list) {
+    if (!c || typeof c !== "object") continue;
+    const o = { ...(c as Record<string, unknown>) };
+    if (typeof o.name !== "string" || o.value === undefined) continue;
+    if (!o.domain && host) o.domain = host;
+    if (!o.path) o.path = "/";
+    if (typeof o.sameSite === "string")
+      o.sameSite = o.sameSite.charAt(0).toUpperCase() + o.sameSite.slice(1).toLowerCase();
+    out.push(o);
+  }
+  return out;
+}
+// Parse a pasted session: a Playwright storageState JSON ({cookies,origins}), a raw cookie
+// array, or a `name=value; name2=value2` Cookie header string (domain from the env host).
+function parsePastedSession(raw: string, host: string): StorageState | null {
+  try {
+    const j = JSON.parse(raw);
+    if (Array.isArray(j)) return { cookies: normalizeCookies(j, host), origins: [] };
+    if (j && typeof j === "object" && (Array.isArray(j.cookies) || Array.isArray(j.origins))) {
+      return {
+        cookies: normalizeCookies(Array.isArray(j.cookies) ? j.cookies : [], host),
+        origins: Array.isArray(j.origins) ? j.origins : [],
+        headers: j.headers && typeof j.headers === "object" ? j.headers : undefined,
+      };
+    }
+  } catch {
+    /* not JSON — fall through to cookie-header parsing */
+  }
+  const cookies = raw
+    .replace(/^cookie:\s*/i, "")
+    .split(";")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const eq = pair.indexOf("=");
+      if (eq < 0) return null;
+      return { name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim(), domain: host, path: "/" };
+    })
+    .filter(Boolean) as Array<Record<string, unknown>>;
+  return cookies.length ? { cookies, origins: [] } : null;
+}
+
+// Paste a session directly (method B): a cookie string or a storageState JSON → stored as
+// the session that runs inject + skip login. No login run needed.
+app.post("/api/environments/:id/set-session", (req, res) => {
+  const env = getEnvironment(req.params.id);
+  if (!env) return res.status(404).json({ error: "environment not found" });
+  const raw = typeof req.body?.raw === "string" ? req.body.raw.trim() : "";
+  if (!raw) return res.status(400).json({ error: "paste a cookie string or a storageState JSON" });
+  const ctx: ResolveContext = { env: env.vars, secrets: getSecretValues(env.projectId) };
+  const host = (() => {
+    try {
+      return new URL(
+        resolveText(env.baseUrl || getProject(env.projectId)?.targetUrl || "", ctx),
+      ).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  const session = parsePastedSession(raw, host);
+  if (!session || (!session.cookies.length && !session.origins.length))
+    return res.status(400).json({ error: "could not parse any cookies or storageState" });
+  const saved = upsertEnvironment({
+    ...env,
+    login: { ...env.login, authRequired: true, session, capturedAt: new Date().toISOString() },
+  });
+  res.json({
+    ok: true,
+    cookies: session.cookies.length,
+    origins: session.origins.length,
+    environment: sanitizeEnv(saved),
+  });
+});
+
 // Clear a captured session (revert to running the UI login flow each run).
 app.delete("/api/environments/:id/session", (req, res) => {
   const env = getEnvironment(req.params.id);
