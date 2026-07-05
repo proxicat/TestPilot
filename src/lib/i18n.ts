@@ -96,6 +96,7 @@ export const dict: Record<string, Entry> = {
     en: "No test data. Use “Ask AI · Data” below to add accounts / values / parameters.",
     ja: "テストデータなし。下部の「AI に依頼 · データ」でアカウント/値/パラメータを追加できます。",
   },
+  "cases.noSteps": { zh: "尚无步骤 —— 该用例仅做断言（如复用登录态直接校验页面）。", en: "No steps — this case only asserts (e.g. reuses a session and checks the page directly).", ja: "ステップなし —— このケースはアサーションのみ（セッション再利用でページを直接検証など）。" },
   "cases.dataDriven": { zh: "数据驱动", en: "Data-driven", ja: "データ駆動" },
   "cases.dataDrivenPlaceholder": { zh: "数据集变量名，如 users", en: "dataset var name, e.g. users", ja: "データセット変数名（例 users）" },
   "cases.dataDrivenHelp": {

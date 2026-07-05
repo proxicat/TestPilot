@@ -1064,17 +1064,25 @@ function DetailPanel({ tc, flake }: { tc: TestCase; flake?: Flakiness }) {
             {t("cases.steps")}
           </span>
         </div>
-        <ol className="list-decimal pl-4 text-xs leading-relaxed text-muted-foreground">
-          {tc.steps.map((s) => (
-            <li key={s.order}>{s.text}</li>
-          ))}
-        </ol>
-        <div className="mt-2 flex items-start gap-1 rounded-md bg-primary/10 px-2 py-1.5 text-[11px] leading-snug text-primary">
-          <Sparkles className="mt-0.5 h-3 w-3 flex-shrink-0" />
-          <span>
-            {tc.priority} — {tc.priorityReason}
-          </span>
-        </div>
+        {tc.steps.length > 0 ? (
+          <ol className="list-decimal pl-4 text-xs leading-relaxed text-muted-foreground">
+            {tc.steps.map((s) => (
+              <li key={s.order}>{s.text}</li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-[11px] italic leading-snug text-muted-foreground">
+            {t("cases.noSteps")}
+          </p>
+        )}
+        {tc.priorityReason && (
+          <div className="mt-2 flex items-start gap-1 rounded-md bg-primary/10 px-2 py-1.5 text-[11px] leading-snug text-primary">
+            <Sparkles className="mt-0.5 h-3 w-3 flex-shrink-0" />
+            <span>
+              {tc.priority} — {tc.priorityReason}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="border-b border-border px-3 py-2.5">
