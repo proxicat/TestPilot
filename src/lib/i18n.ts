@@ -543,6 +543,7 @@ export const dict: Record<string, Entry> = {
   // ---- projects ----
   "projects.title": { zh: "项目", en: "Projects", ja: "プロジェクト" },
   "projects.newProject": { zh: "新建项目", en: "New project", ja: "新規プロジェクト" },
+  "projects.tryDappExample": { zh: "试试 dapp 示例", en: "Try dapp example", ja: "dapp の例を試す" },
   "projects.subtitle": { zh: "让 TestPilot 指向一个网站，规划并管理其端到端测试套件。", en: "Point TestPilot at a website to plan and manage its E2E test suite.", ja: "TestPilot をウェブサイトに向けて、E2E テストスイートを計画・管理します。" },
   "projects.backendOfflineLocal": { zh: "（后端离线 — 显示本地数据）", en: "(backend offline — showing local data)", ja: "（バックエンドがオフライン — ローカルデータを表示）" },
   "projects.name": { zh: "名称", en: "Name", ja: "名前" },

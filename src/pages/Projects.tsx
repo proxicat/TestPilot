@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Globe, ListChecks, Plus, ChevronRight } from "lucide-react";
+import { Globe, ListChecks, Plus, ChevronRight, Rocket, Loader2, Blocks } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui";
 import { useT } from "@/lib/prefs";
+import { api } from "@/lib/api";
 
 export function ProjectsPage() {
   const t = useT();
@@ -13,16 +14,31 @@ export function ProjectsPage() {
   const activeId = useStore((s) => s.activeProjectId);
   const selectProject = useStore((s) => s.selectProject);
   const createProject = useStore((s) => s.createProject);
+  const loadData = useStore((s) => s.loadData);
   const backendUp = useStore((s) => s.backendUp);
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("https://");
   const [busy, setBusy] = useState(false);
+  const [exBusy, setExBusy] = useState(false);
 
   const open = async (id: string) => {
     await selectProject(id);
     navigate("/cases");
+  };
+  // One-click Uniswap dapp example: create (or reuse) the sample project + cases, then open it.
+  const tryDappExample = async () => {
+    setExBusy(true);
+    try {
+      const { project } = await api.loadUniswapExample();
+      await loadData();
+      await selectProject(project.id);
+      navigate("/cases");
+    } catch {
+      /* backend offline */
+    }
+    setExBusy(false);
   };
   const submit = async () => {
     if (!name.trim() || !/^https?:\/\/.+/.test(url)) return;
@@ -39,10 +55,20 @@ export function ProjectsPage() {
     <>
       <TopBar
         actions={
-          <Button variant="primary" onClick={() => setAdding((a) => !a)}>
-            <Plus className="h-3.5 w-3.5" />
-            {t("projects.newProject")}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={tryDappExample} disabled={exBusy || !backendUp}>
+              {exBusy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Blocks className="h-3.5 w-3.5 text-violet-500" />
+              )}
+              {t("projects.tryDappExample")}
+            </Button>
+            <Button variant="primary" onClick={() => setAdding((a) => !a)}>
+              <Plus className="h-3.5 w-3.5" />
+              {t("projects.newProject")}
+            </Button>
+          </div>
         }
       />
       <div className="flex-1 overflow-auto p-4">
@@ -92,8 +118,21 @@ export function ProjectsPage() {
         )}
 
         {projects.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            {t("projects.empty")}
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+            <span>{t("projects.empty")}</span>
+            <Button
+              variant="outline"
+              onClick={tryDappExample}
+              disabled={exBusy || !backendUp}
+              className="text-xs"
+            >
+              {exBusy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Rocket className="h-3.5 w-3.5 text-violet-500" />
+              )}
+              {t("projects.tryDappExample")}
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
