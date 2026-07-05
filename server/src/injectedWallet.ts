@@ -62,10 +62,13 @@ function buildInjectSource(address: string, chainIdHex: string): string {
 export async function setupInjectedWallet(
   page: Page,
   cfg: ChainConfig,
-): Promise<{ address: string }> {
+): Promise<{ address: string; sentTxs: string[] }> {
   const provider = new JsonRpcProvider(cfg.rpcUrl, cfg.chainId);
   const wallet = Wallet.fromPhrase(readSeed()).connect(provider);
   const chainIdHex = "0x" + cfg.chainId.toString(16);
+  // Every tx the dapp UI triggers passes through here (we ARE the wallet) — record the hash
+  // so the run can assert on the wallet's new on-chain record. No polling/listening needed.
+  const sentTxs: string[] = [];
 
   const forkRpc = async (method: string, params: unknown[] = []): Promise<unknown> => {
     if (method === "eth_sendTransaction") {
@@ -81,6 +84,7 @@ export async function setupInjectedWallet(
         value: t.value ? BigInt(t.value) : 0n,
         ...(t.gas ? { gasLimit: BigInt(t.gas) } : {}),
       });
+      sentTxs.push(sent.hash);
       return sent.hash;
     }
     if (method === "personal_sign") return wallet.signMessage(getBytes(params[0] as string));
@@ -121,5 +125,5 @@ export async function setupInjectedWallet(
     }
   });
 
-  return { address: wallet.address };
+  return { address: wallet.address, sentTxs };
 }

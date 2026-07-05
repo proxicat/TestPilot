@@ -51,6 +51,60 @@ export async function readBalance(
   return typeof r === "string" && r.startsWith("0x") ? BigInt(r) : 0n;
 }
 
+export interface TxReceipt {
+  hash: string;
+  status: number; // 1 = success, 0 = reverted, -1 = never mined (timed out)
+  blockNumber?: string;
+  from?: string;
+}
+// Poll receipts for the tx hashes the wallet sent this run, until mined or timeout. This is
+// how "the wallet got a new confirmed record" is verified — no listening, we already have
+// the hashes from our own injected provider.
+export async function collectReceipts(
+  rpcUrl: string,
+  hashes: string[],
+  timeoutMs = 30000,
+): Promise<TxReceipt[]> {
+  const pending = new Set([...new Set(hashes)]);
+  const out: TxReceipt[] = [];
+  const end = Date.now() + timeoutMs;
+  while (pending.size && Date.now() < end) {
+    for (const h of [...pending]) {
+      const r = await rpcCall(rpcUrl, "eth_getTransactionReceipt", [h]).catch(() => null);
+      if (r && typeof r === "object") {
+        const rec = r as { status?: string; blockNumber?: string; from?: string };
+        out.push({
+          hash: h,
+          status: rec.status === "0x1" ? 1 : 0,
+          blockNumber: rec.blockNumber,
+          from: rec.from,
+        });
+        pending.delete(h);
+      }
+    }
+    if (pending.size) await new Promise((res) => setTimeout(res, 1500));
+  }
+  for (const h of pending) out.push({ hash: h, status: -1 }); // never mined
+  return out;
+}
+// Evaluate a txSubmitted assertion: count the wallet's successful (mined, status 1) txs.
+export function evalTxSubmitted(
+  a: ChainAssertion,
+  receipts: TxReceipt[],
+): { assertion: string; status: "pass" | "fail"; detail?: string } {
+  const success = receipts.filter((r) => r.status === 1);
+  const n = success.length;
+  const want = a.value && !Number.isNaN(Number(a.value)) ? Number(a.value) : 1;
+  const op = a.op === "eq" ? "eq" : a.op === "lte" ? "lte" : "gte";
+  const ok = op === "eq" ? n === want : op === "lte" ? n <= want : n >= want;
+  const label = a.label?.trim() || "wallet sent a successful transaction";
+  const shown = success.slice(0, 2).map((r) => `${r.hash.slice(0, 12)}…`).join(", ");
+  const failed = receipts.length - success.length;
+  const detail =
+    `${n} mined${shown ? ` (${shown})` : ""}` + (failed > 0 ? `, ${failed} failed/pending` : "");
+  return { assertion: `⛓ ${label}`, status: ok ? "pass" : "fail", detail };
+}
+
 // Snapshot every assertion's balance in parallel (called before + after the steps).
 export async function snapshotBalances(
   rpcUrl: string,

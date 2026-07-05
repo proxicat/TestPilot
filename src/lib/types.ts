@@ -66,12 +66,12 @@ export interface Project {
 
 export type Web3Mode = "" | "injected" | "metamask";
 export interface ChainAssertion {
-  kind: "erc20Balance" | "nativeBalance";
+  kind: "erc20Balance" | "nativeBalance" | "txSubmitted";
   account?: string;
   token?: string;
   decimals?: number;
   op: "increased" | "decreased" | "changed" | "gte" | "lte" | "eq";
-  value?: string;
+  value?: string; // balance threshold, or (for txSubmitted) the tx count
   label?: string;
 }
 

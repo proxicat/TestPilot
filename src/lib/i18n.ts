@@ -180,6 +180,8 @@ export const dict: Record<string, Entry> = {
   "cases.erc20": { zh: "ERC-20 余额", en: "ERC-20 balance", ja: "ERC-20 残高" },
   "cases.native": { zh: "原生余额 (ETH)", en: "Native balance (ETH)", ja: "ネイティブ残高 (ETH)" },
   "cases.accountDefault": { zh: "账户 0x…（留空=测试钱包）", en: "account 0x… (blank = test wallet)", ja: "アカウント 0x…（空=テストウォレット）" },
+  "cases.txSubmitted": { zh: "钱包发出成功交易", en: "Wallet sent a successful tx", ja: "ウォレットが成功トランザクションを送信" },
+  "cases.txSubmittedHint": { zh: "断言本次 UI 操作让测试钱包发出 ≥N 笔已上链成功的交易（最终真值，不依赖读 dapp 成功提示）。", en: "Assert the UI interaction made the test wallet send ≥N mined, successful txs — the ground truth, no need to read the dapp's success UI.", ja: "UI操作でテストウォレットが≥N件のマイニング成功トランザクションを送信したことを検証（dappの成功表示に依存しない最終真値）。" },
   "cases.dataDriven": { zh: "数据驱动", en: "Data-driven", ja: "データ駆動" },
   "cases.dataDrivenPlaceholder": { zh: "数据集变量名，如 users", en: "dataset var name, e.g. users", ja: "データセット変数名（例 users）" },
   "cases.dataDrivenHelp": {

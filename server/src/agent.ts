@@ -130,6 +130,7 @@ export interface Session {
   walletUnlocked?: boolean;
   walletPage?: Page; // kept-open MetaMask page holding the unlock (MV3 keep-alive)
   injectedAddress?: string; // address of the injected virtual wallet (injected mode)
+  sentTxs?: string[]; // tx hashes the injected wallet sent this session (live-updated)
   cleanup: () => Promise<void>;
 }
 
@@ -167,7 +168,7 @@ export async function launchSession(
     await page.setUserAgent(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     );
-    const { address } = await setupInjectedWallet(page, cfg);
+    const { address, sentTxs } = await setupInjectedWallet(page, cfg);
     await applyPreNav(page, opts);
     const navUrl = appendQuery(url, opts.query);
     await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -181,7 +182,7 @@ export async function launchSession(
         /* ignore */
       }
     };
-    return { agent, page, browser, injectedAddress: address, cleanup };
+    return { agent, page, browser, injectedAddress: address, sentTxs, cleanup };
   }
 
   const wantsWallet = opts.wallet && isWalletInstalled();

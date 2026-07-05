@@ -952,24 +952,33 @@ function Web3Section({ tc }: { tc: TestCase }) {
             {rows.map((a, i) => (
               <div key={i} className="space-y-1 rounded-md border border-border p-1.5">
                 <div className="flex items-center gap-1">
-                  <select value={a.kind} onChange={(e) => commitLocal(i, { kind: e.target.value as ChainAssertion["kind"] })} className={cn(INPUT, "flex-1")}>
+                  <select
+                    value={a.kind}
+                    onChange={(e) => {
+                      const kind = e.target.value as ChainAssertion["kind"];
+                      // txSubmitted counts txs (op ≥/≤/=, value=count) — snap sane defaults on switch.
+                      commitLocal(i, kind === "txSubmitted" ? { kind, op: "gte", value: a.value || "1" } : { kind });
+                    }}
+                    className={cn(INPUT, "flex-1")}
+                  >
                     <option value="erc20Balance">{t("cases.erc20")}</option>
                     <option value="nativeBalance">{t("cases.native")}</option>
+                    <option value="txSubmitted">{t("cases.txSubmitted")}</option>
                   </select>
                   <select value={a.op} onChange={(e) => commitLocal(i, { op: e.target.value as ChainAssertion["op"] })} className={INPUT}>
-                    <option value="increased">↑ increased</option>
-                    <option value="decreased">↓ decreased</option>
-                    <option value="changed">≠ changed</option>
+                    {a.kind !== "txSubmitted" && <option value="increased">↑ increased</option>}
+                    {a.kind !== "txSubmitted" && <option value="decreased">↓ decreased</option>}
+                    {a.kind !== "txSubmitted" && <option value="changed">≠ changed</option>}
                     <option value="gte">≥</option>
                     <option value="lte">≤</option>
                     <option value="eq">=</option>
                   </select>
-                  {(a.op === "gte" || a.op === "lte" || a.op === "eq") && (
+                  {(a.kind === "txSubmitted" || a.op === "gte" || a.op === "lte" || a.op === "eq") && (
                     <input
                       value={a.value ?? ""}
                       onChange={(e) => setLocal(i, { value: e.target.value })}
                       onBlur={() => commit(rows)}
-                      placeholder="0.0"
+                      placeholder={a.kind === "txSubmitted" ? "1" : "0.0"}
                       className={cn(INPUT, "w-14 font-mono")}
                     />
                   )}
@@ -983,7 +992,11 @@ function Web3Section({ tc }: { tc: TestCase }) {
                     <input type="number" value={a.decimals ?? 6} onChange={(e) => commitLocal(i, { decimals: Number(e.target.value) })} title="decimals" className={cn(INPUT, "w-12 font-mono")} />
                   </div>
                 )}
-                <input value={a.account ?? ""} onChange={(e) => setLocal(i, { account: e.target.value })} onBlur={() => commit(rows)} placeholder={t("cases.accountDefault")} className={cn(INPUT, "w-full font-mono")} />
+                {a.kind === "txSubmitted" ? (
+                  <p className="text-[10px] leading-tight text-muted-foreground">{t("cases.txSubmittedHint")}</p>
+                ) : (
+                  <input value={a.account ?? ""} onChange={(e) => setLocal(i, { account: e.target.value })} onBlur={() => commit(rows)} placeholder={t("cases.accountDefault")} className={cn(INPUT, "w-full font-mono")} />
+                )}
               </div>
             ))}
           </div>

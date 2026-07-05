@@ -80,7 +80,7 @@ import {
   LLM_DEBUG_DIR,
 } from "./settings.js";
 import { resolveText, resolveMap, redact, type ResolveContext } from "./interpolate.js";
-import { snapshotBalances, evalChainAssertion } from "./chain.js";
+import { snapshotBalances, evalChainAssertion, collectReceipts, evalTxSubmitted } from "./chain.js";
 import { seedIfEmpty } from "./seed.js";
 import { buildExportFiles } from "./export.js";
 import { captureMidsceneReport } from "./report.js";
@@ -249,8 +249,17 @@ async function executeRun(
     if (opts.web3?.chainAssertions?.length) {
       try {
         const after = await snapshotBalances(opts.web3.rpcUrl, opts.web3.chainAssertions, opts.web3.account);
+        // If any assertion checks "the wallet sent a tx", poll receipts for the hashes our
+        // injected wallet recorded this run (from the actual UI interaction — we ARE the wallet).
+        const needsTx = opts.web3.chainAssertions.some((a) => a.kind === "txSubmitted");
+        const sent = session.sentTxs ?? [];
+        if (needsTx) rlog(`wallet sent ${sent.length} tx(s) this run — polling receipts`);
+        const receipts = needsTx ? await collectReceipts(opts.web3.rpcUrl, sent, 30000) : [];
         opts.web3.chainAssertions.forEach((a, i) => {
-          const r = evalChainAssertion(a, chainBefore[i] ?? 0n, after[i] ?? 0n);
+          const r =
+            a.kind === "txSubmitted"
+              ? evalTxSubmitted(a, receipts)
+              : evalChainAssertion(a, chainBefore[i] ?? 0n, after[i] ?? 0n);
           oracle.push(r);
           rlog(`chain ${r.status === "pass" ? "✓" : "✗"} ${r.assertion} — ${r.detail}`);
           if (r.status === "fail") assertFailed = assertFailed || `chain assertion: ${r.assertion}`;

@@ -218,12 +218,13 @@ export type Web3Mode = "" | "injected" | "metamask"; // "" = no wallet
 // An on-chain assertion checked against the RPC after the case's steps run — verifies the
 // real chain state, not just the UI (e.g. a token balance rose after a swap).
 export interface ChainAssertion {
-  kind: "erc20Balance" | "nativeBalance";
+  // txSubmitted: the wallet sent ≥/=/≤ N successful (mined, status 1) transactions this run.
+  kind: "erc20Balance" | "nativeBalance" | "txSubmitted";
   account?: string; // default: the test wallet
   token?: string; // ERC-20 contract (for erc20Balance)
   decimals?: number; // token decimals for display/compare (default 18; USDC=6)
   op: "increased" | "decreased" | "changed" | "gte" | "lte" | "eq";
-  value?: string; // human-unit threshold for gte/lte/eq
+  value?: string; // human-unit threshold (balance) or count (txSubmitted) for gte/lte/eq
   label?: string; // display label
 }
 export interface TestCase {
