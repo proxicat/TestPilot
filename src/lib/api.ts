@@ -192,7 +192,9 @@ export const api = {
       id?: string;
       name: string;
       baseUrl: string;
-      vars: Record<string, string>;
+      vars: Record<string, string | string[]>;
+      headers: Record<string, string>;
+      query: Record<string, string>;
       login: { authRequired?: boolean; steps?: string[] };
       isDefault: boolean;
     },
@@ -204,6 +206,17 @@ export const api = {
     ),
   deleteEnvironment: (envId: string) =>
     del<{ ok: true }>(`/api/environments/${envId}`),
+  // Run the env's login flow once and cache the resulting session (storageState).
+  captureSession: (envId: string) =>
+    post<{
+      ok: true;
+      cookies: number;
+      localStorage: number;
+      log: string[];
+      environment: Environment;
+    }>(`/api/environments/${envId}/capture-session`, {}, 600000),
+  clearSession: (envId: string) =>
+    del<{ ok: true; environment: Environment }>(`/api/environments/${envId}/session`),
 
   // ---- secrets (per project; values are write-only, never returned) ----
   getSecrets: (projectId: string) =>

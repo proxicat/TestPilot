@@ -820,6 +820,112 @@ function ChainConfigCard() {
 
 const NEW_ENV = "__new__";
 type VarRow = { key: string; value: string };
+type SessionInfo = { hasSession: boolean; capturedAt?: string; cookies: number };
+
+// Turn a key→value map (values may be arrays) into editable rows; arrays show as JSON.
+const toRows = (obj?: Record<string, string | string[]>): VarRow[] =>
+  Object.entries(obj ?? {}).map(([key, value]) => ({
+    key,
+    value: Array.isArray(value) ? JSON.stringify(value) : String(value),
+  }));
+
+// Rows → map. When parseArrays, a value that is a JSON array (e.g. ["a","b"]) is stored
+// as a real array so ${env.KEY.N} works and data-driven runs can iterate it later.
+function rowsToMap(rows: VarRow[], parseArrays = false): Record<string, string | string[]> {
+  const m: Record<string, string | string[]> = {};
+  for (const { key, value } of rows) {
+    const k = key.trim();
+    if (!k) continue;
+    if (parseArrays && value.trim().startsWith("[")) {
+      try {
+        const a = JSON.parse(value.trim());
+        if (Array.isArray(a)) {
+          m[k] = a.map(String);
+          continue;
+        }
+      } catch {
+        /* not valid JSON — treat as a plain string */
+      }
+    }
+    m[k] = value;
+  }
+  return m;
+}
+
+// Parse a batch paste — a JSON object or `key=value` / `key: value` lines — into rows.
+function parseBatch(text: string): Record<string, string> | null {
+  const t = text.trim();
+  if (!t) return null;
+  try {
+    const o = JSON.parse(t);
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(o))
+        out[k] = Array.isArray(v) ? JSON.stringify(v) : String(v);
+      return out;
+    }
+  } catch {
+    /* not JSON — fall through to line parsing */
+  }
+  const out: Record<string, string> = {};
+  for (const line of t.split("\n")) {
+    const m = line.match(/^\s*([A-Za-z0-9_.-]+)\s*[=:]\s*(.*)$/);
+    if (m) out[m[1]] = m[2].trim();
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// Reusable key/value editor (used for vars, headers, and query params).
+function KvEditor({
+  rows,
+  setRows,
+  keyPh = "KEY",
+  valPh = "value",
+}: {
+  rows: VarRow[];
+  setRows: (r: VarRow[]) => void;
+  keyPh?: string;
+  valPh?: string;
+}) {
+  const t = useT();
+  const set = (i: number, patch: Partial<VarRow>) =>
+    setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  return (
+    <div className="space-y-1.5">
+      {rows.map((v, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={v.key}
+            placeholder={keyPh}
+            onChange={(e) => set(i, { key: e.target.value })}
+            className="w-1/3 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+          />
+          <input
+            type="text"
+            value={v.value}
+            placeholder={valPh}
+            onChange={(e) => set(i, { value: e.target.value })}
+            className="flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
+            aria-label="Remove"
+            className="cursor-pointer text-muted-foreground hover:text-red-500"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={() => setRows([...rows, { key: "", value: "" }])}
+        className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" /> {t("common.add")}
+      </button>
+    </div>
+  );
+}
 
 function blankEnvForm() {
   return {
@@ -827,22 +933,32 @@ function blankEnvForm() {
     name: "",
     baseUrl: "",
     vars: [{ key: "", value: "" }] as VarRow[],
+    headers: [] as VarRow[],
+    query: [] as VarRow[],
     authRequired: false,
     steps: "",
     isDefault: false,
+    session: null as SessionInfo | null,
   };
 }
 
 function formFromEnv(env: Environment) {
-  const vars = Object.entries(env.vars ?? {}).map(([key, value]) => ({ key, value }));
+  const vars = toRows(env.vars);
   return {
     id: env.id,
     name: env.name,
     baseUrl: env.baseUrl,
     vars: vars.length ? vars : [{ key: "", value: "" }],
+    headers: toRows(env.headers),
+    query: toRows(env.query),
     authRequired: !!env.login?.authRequired,
     steps: (env.login?.steps ?? []).join("\n"),
     isDefault: env.isDefault,
+    session: {
+      hasSession: !!env.login?.hasSession,
+      capturedAt: env.login?.capturedAt,
+      cookies: env.login?.sessionCookies ?? 0,
+    },
   };
 }
 
@@ -900,24 +1016,64 @@ function EnvironmentsCard() {
     if (env) setForm(formFromEnv(env));
   };
 
-  const setVar = (i: number, patch: Partial<VarRow>) =>
+  // Batch import (JSON object or key=value lines) → merge into data vars.
+  const [batchText, setBatchText] = useState("");
+  const [showBatch, setShowBatch] = useState(false);
+  const importBatch = () => {
+    const parsed = parseBatch(batchText);
+    if (!parsed) return;
+    setForm((f) => {
+      const map = new Map(f.vars.filter((v) => v.key.trim()).map((v) => [v.key.trim(), v.value]));
+      for (const [k, v] of Object.entries(parsed)) map.set(k, v);
+      return { ...f, vars: [...map.entries()].map(([key, value]) => ({ key, value })) };
+    });
+    setBatchText("");
+    setShowBatch(false);
+  };
+
+  // Session capture / clear (runs the login flow once → cached storageState).
+  const [sessionState, setSessionState] = useState<"idle" | "capturing" | "error">("idle");
+  const [sessionMsg, setSessionMsg] = useState("");
+  const applySessionInfo = (env: Environment) =>
     setForm((f) => ({
       ...f,
-      vars: f.vars.map((v, idx) => (idx === i ? { ...v, ...patch } : v)),
+      session: {
+        hasSession: !!env.login?.hasSession,
+        capturedAt: env.login?.capturedAt,
+        cookies: env.login?.sessionCookies ?? 0,
+      },
     }));
-  const addVar = () =>
-    setForm((f) => ({ ...f, vars: [...f.vars, { key: "", value: "" }] }));
-  const removeVar = (i: number) =>
-    setForm((f) => ({ ...f, vars: f.vars.filter((_, idx) => idx !== i) }));
+  const capture = async () => {
+    if (!form.id) return;
+    setSessionState("capturing");
+    setSessionMsg("");
+    try {
+      const r = await api.captureSession(form.id);
+      applySessionInfo(r.environment);
+      setEnvs((es) => es.map((e) => (e.id === r.environment.id ? r.environment : e)));
+      setSessionMsg(`${r.cookies} cookies · ${r.localStorage} localStorage`);
+      setSessionState("idle");
+    } catch (e) {
+      setSessionState("error");
+      setSessionMsg((e as Error).message);
+    }
+  };
+  const clearSession = async () => {
+    if (!form.id) return;
+    try {
+      const { environment } = await api.clearSession(form.id);
+      applySessionInfo(environment);
+      setEnvs((es) => es.map((e) => (e.id === environment.id ? environment : e)));
+      setSessionMsg("");
+    } catch {
+      /* ignore */
+    }
+  };
 
   const save = async () => {
     if (!projectId || !form.name.trim()) return;
     setState("saving");
     setDetail("");
-    const vars: Record<string, string> = {};
-    for (const { key, value } of form.vars) {
-      if (key.trim()) vars[key.trim()] = value;
-    }
     const login: LoginFlow = {
       authRequired: form.authRequired,
       steps: form.authRequired
@@ -932,12 +1088,18 @@ function EnvironmentsCard() {
         id: form.id,
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim(),
-        vars,
+        vars: rowsToMap(form.vars, true),
+        headers: rowsToMap(form.headers) as Record<string, string>,
+        query: rowsToMap(form.query) as Record<string, string>,
         login,
         isDefault: form.isDefault,
       });
-      await load();
+      setEnvs((es) => {
+        const has = es.some((e) => e.id === environment.id);
+        return has ? es.map((e) => (e.id === environment.id ? environment : e)) : [...es, environment];
+      });
       setSelected(environment.id);
+      setForm(formFromEnv(environment));
       setState("idle");
     } catch (e) {
       setState("error");
@@ -1037,45 +1199,59 @@ function EnvironmentsCard() {
             />
           </div>
 
+          {/* Test data (non-secret vars) — batch import + array support */}
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {t("model.varsNonSecret")}
-              </span>
+              <span className="text-xs text-muted-foreground">{t("model.varsNonSecret")}</span>
               <button
-                onClick={addVar}
-                className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setShowBatch((s) => !s)}
+                className="flex cursor-pointer items-center gap-1 text-xs text-primary hover:underline"
               >
-                <Plus className="h-3.5 w-3.5" /> {t("common.add")}
+                <FileText className="h-3.5 w-3.5" /> {t("model.batchImport")}
               </button>
             </div>
-            <div className="space-y-1.5">
-              {form.vars.map((v, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={v.key}
-                    placeholder="KEY"
-                    onChange={(e) => setVar(i, { key: e.target.value })}
-                    className="w-1/3 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <input
-                    type="text"
-                    value={v.value}
-                    placeholder="value"
-                    onChange={(e) => setVar(i, { value: e.target.value })}
-                    className="flex-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    onClick={() => removeVar(i)}
-                    aria-label="Remove variable"
-                    className="cursor-pointer text-muted-foreground hover:text-red-500"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+            {showBatch && (
+              <div className="mb-2 rounded-md border border-border bg-background p-2">
+                <textarea
+                  rows={4}
+                  value={batchText}
+                  onChange={(e) => setBatchText(e.target.value)}
+                  placeholder={'{ "USER": "alice", "terms": ["a", "b", "c"] }\n— or —\nUSER=alice\nterms=["a","b","c"]'}
+                  className="w-full rounded border border-border bg-card px-2 py-1 font-mono text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                />
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Button variant="primary" className="text-xs" onClick={importBatch} disabled={!batchText.trim()}>
+                    {t("model.import")}
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">{t("model.batchImportHelp")}</span>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+            <KvEditor rows={form.vars} setRows={(vars) => setForm((f) => ({ ...f, vars }))} valPh='value or ["a","b"]' />
+          </div>
+
+          {/* Fixed request headers — pass the site's own checks (auth, feature flags, bot bypass) */}
+          <div>
+            <span className="mb-1 block text-xs text-muted-foreground">{t("model.headers")}</span>
+            <KvEditor
+              rows={form.headers}
+              setRows={(headers) => setForm((f) => ({ ...f, headers }))}
+              keyPh="X-Automation-Test"
+              valPh="true  ·  Bearer ${secret.TOKEN}"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">{t("model.headersHelp")}</p>
+          </div>
+
+          {/* Fixed query-string params appended to every navigation */}
+          <div>
+            <span className="mb-1 block text-xs text-muted-foreground">{t("model.queryParams")}</span>
+            <KvEditor
+              rows={form.query}
+              setRows={(query) => setForm((f) => ({ ...f, query }))}
+              keyPh="e2e"
+              valPh="1"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">{t("model.queryHelp")}</p>
           </div>
 
           <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
@@ -1116,6 +1292,68 @@ function EnvironmentsCard() {
                 <code className="font-mono">{"${secret.KEY}"}</code>{" "}
                 {t("model.placeholders")}
               </p>
+
+              {/* Session capture: run the login flow once, cache storageState, skip login on runs */}
+              <div className="mt-3 rounded-md border border-border bg-background p-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <KeyRound className="h-3.5 w-3.5 text-muted-foreground" /> {t("model.session")}
+                </div>
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                  {t("model.sessionHelp")}
+                </p>
+                {form.session?.hasSession ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                      {t("model.sessionCaptured")} · {form.session.cookies} cookies
+                    </span>
+                    {form.session.capturedAt && (
+                      <span className="text-muted-foreground">
+                        {new Date(form.session.capturedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-muted-foreground">{t("model.noSession")}</p>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="primary"
+                    className="bg-violet-600 text-xs hover:bg-violet-700"
+                    onClick={capture}
+                    disabled={!form.id || sessionState === "capturing"}
+                    title={!form.id ? t("model.captureNeedsSave") : undefined}
+                  >
+                    {sessionState === "capturing" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <KeyRound className="h-3.5 w-3.5" />
+                    )}
+                    {form.session?.hasSession ? t("model.recapture") : t("model.captureSession")}
+                  </Button>
+                  {form.session?.hasSession && (
+                    <Button className="text-xs" onClick={clearSession}>
+                      <Trash2 className="h-3.5 w-3.5" /> {t("model.clearSession")}
+                    </Button>
+                  )}
+                  {!form.id && (
+                    <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                      {t("model.captureNeedsSave")}
+                    </span>
+                  )}
+                  {sessionMsg && (
+                    <span
+                      className={cn(
+                        "text-[11px]",
+                        sessionState === "error"
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {sessionMsg}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

@@ -13,6 +13,69 @@ import {
 } from "./wallet.js";
 import { resolveChainConfig, resolveViewport } from "./config.js";
 import { setupInjectedWallet } from "./injectedWallet.js";
+import type { StorageState } from "./db.js";
+
+// Append fixed query params to a navigation URL (e.g. ?e2e=1&feature=x).
+function appendQuery(url: string, query?: Record<string, string>): string {
+  if (!query || !Object.keys(query).length) return url;
+  try {
+    const u = new URL(url);
+    for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v);
+    return u.toString();
+  } catch {
+    return url; // non-absolute URL (about:blank etc.) — leave as-is
+  }
+}
+
+// Fixed headers + captured cookies must be set BEFORE the first navigation.
+async function applyPreNav(page: Page, opts: LaunchOpts): Promise<void> {
+  if (opts.extraHeaders && Object.keys(opts.extraHeaders).length) {
+    await page.setExtraHTTPHeaders(opts.extraHeaders);
+  }
+  const cookies = opts.storageState?.cookies;
+  if (cookies?.length) {
+    // Keep only the fields Puppeteer's setCookie accepts (page.cookies() adds extras).
+    const clean = cookies.map((c) => {
+      const o = c as Record<string, unknown>;
+      const p: Record<string, unknown> = { name: o.name, value: o.value };
+      for (const k of ["domain", "path", "expires", "httpOnly", "secure", "sameSite", "url"])
+        if (o[k] !== undefined) p[k] = o[k];
+      return p;
+    });
+    try {
+      await page.setCookie(...(clean as unknown as Parameters<Page["setCookie"]>));
+    } catch {
+      /* some cookies may be rejected (e.g. bad domain) — best effort */
+    }
+  }
+}
+
+// Captured localStorage is per-origin and only applies once the page is on that origin,
+// so it runs AFTER the first navigation. Returns true if anything was injected (→ reload).
+async function applyPostNav(page: Page, storageState?: StorageState | null): Promise<boolean> {
+  const origins = storageState?.origins;
+  if (!origins?.length) return false;
+  let injected = false;
+  try {
+    const here = new URL(page.url()).origin;
+    const match = origins.find((o) => o.origin === here) ?? origins[0];
+    if (match?.localStorage?.length) {
+      await page.evaluate((items: { name: string; value: string }[]) => {
+        for (const it of items) {
+          try {
+            window.localStorage.setItem(it.name, it.value);
+          } catch {
+            /* quota / disabled — skip */
+          }
+        }
+      }, match.localStorage);
+      injected = true;
+    }
+  } catch {
+    /* cross-origin / no storage — skip */
+  }
+  return injected;
+}
 
 export interface Session {
   agent: PuppeteerAgent;
@@ -33,6 +96,9 @@ export interface LaunchOpts {
   chainId?: number; // override the injected wallet's chainId
   cacheId?: string; // Midscene cache key (with MIDSCENE_CACHE=1, re-runs replay from cache)
   headless?: boolean;
+  extraHeaders?: Record<string, string>; // fixed request headers (resolved, secrets injected)
+  query?: Record<string, string>; // fixed query-string params appended to navigations
+  storageState?: StorageState | null; // captured login state → cookies + localStorage injected
 }
 
 // Launch Chrome for Testing (Puppeteer's default build) and wrap the page in a Midscene agent.
@@ -56,7 +122,11 @@ export async function launchSession(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     );
     const { address } = await setupInjectedWallet(page, cfg);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await applyPreNav(page, opts);
+    const navUrl = appendQuery(url, opts.query);
+    await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    if (await applyPostNav(page, opts.storageState))
+      await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
     const agent = new PuppeteerAgent(page, opts.cacheId ? { cacheId: opts.cacheId } : undefined);
     const cleanup = async () => {
       try {
@@ -120,9 +190,14 @@ export async function launchSession(
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
+  await applyPreNav(page, opts);
+  const navUrl = appendQuery(url, opts.query);
   // domcontentloaded (not networkidle0): robust for sites with analytics/polling that
   // never fully idle. aiAction waits for its target elements anyway.
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  // Inject captured localStorage (per-origin) then reload so the app reads it.
+  if (await applyPostNav(page, opts.storageState))
+    await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
 
   const agent = new PuppeteerAgent(page, opts.cacheId ? { cacheId: opts.cacheId } : undefined);
   const cleanup = async () => {

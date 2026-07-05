@@ -5,6 +5,11 @@ export type CaseType = "functional" | "negative" | "boundary" | "e2e";
 export interface LoginFlow {
   authRequired?: boolean;
   steps?: string[];
+  // Captured-session summary (the blob itself never leaves the server).
+  capturedAt?: string;
+  hasSession?: boolean;
+  sessionCookies?: number;
+  sessionOrigins?: number;
 }
 
 export interface Environment {
@@ -12,7 +17,9 @@ export interface Environment {
   projectId: string;
   name: string;
   baseUrl: string;
-  vars: Record<string, string>;
+  vars: Record<string, string | string[]>; // value may be an array (data-driven)
+  headers: Record<string, string>; // fixed request headers
+  query: Record<string, string>; // fixed query-string params
   login: LoginFlow;
   isDefault: boolean;
   createdAt: string;

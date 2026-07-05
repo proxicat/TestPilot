@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS environments (
   baseUrl TEXT NOT NULL DEFAULT '',
   varsJson TEXT NOT NULL DEFAULT '{}',
   loginJson TEXT NOT NULL DEFAULT '{}',
+  headersJson TEXT NOT NULL DEFAULT '{}',   -- fixed request headers (may hold secret refs)
+  queryJson TEXT NOT NULL DEFAULT '{}',     -- fixed query-string params appended to navigations
+  sessionEnc TEXT NOT NULL DEFAULT '',      -- captured login state (storageState), AES-encrypted
   isDefault INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL,
   UNIQUE(projectId, name)
@@ -180,6 +183,16 @@ const batchCols = new Set(
 );
 if (batchCols.size && !batchCols.has("errored"))
   db.exec("ALTER TABLE batches ADD COLUMN errored INTEGER NOT NULL DEFAULT 0");
+// Data-binding upgrade: fixed request headers, query params, and captured login state.
+const envCols = new Set(
+  (db.prepare("PRAGMA table_info(environments)").all() as { name: string }[]).map((r) => r.name),
+);
+if (envCols.size && !envCols.has("headersJson"))
+  db.exec("ALTER TABLE environments ADD COLUMN headersJson TEXT NOT NULL DEFAULT '{}'");
+if (envCols.size && !envCols.has("queryJson"))
+  db.exec("ALTER TABLE environments ADD COLUMN queryJson TEXT NOT NULL DEFAULT '{}'");
+if (envCols.size && !envCols.has("sessionEnc"))
+  db.exec("ALTER TABLE environments ADD COLUMN sessionEnc TEXT NOT NULL DEFAULT ''");
 
 export type Priority = "P0" | "P1" | "P2";
 export type RunStatus = "passed" | "failed" | "notRun" | "running";
@@ -215,17 +228,28 @@ export interface TestCase {
   createdAt: string;
 }
 
+// A captured browser session (Playwright-compatible storageState shape) — cookies plus
+// per-origin localStorage. Injected before navigation so runs start authenticated.
+export interface StorageState {
+  cookies: Array<Record<string, unknown>>;
+  origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+}
 // Environment: per-project target + non-secret vars + a reusable login flow.
 export interface LoginFlow {
   authRequired?: boolean; // when true, cases run the login steps first
   steps?: string[]; // login actions; may reference env/secret placeholders
+  session?: StorageState | null; // captured login state — when present, injected + login SKIPPED
+  capturedAt?: string; // when the session was captured (for staleness display)
 }
 export interface Environment {
   id: string;
   projectId: string;
   name: string;
   baseUrl: string;
-  vars: Record<string, string>;
+  // Value may be an array (data-driven / multi-value); ${env.KEY.N} picks an element.
+  vars: Record<string, string | string[]>;
+  headers: Record<string, string>; // fixed request headers (may hold ${env}/${secret} refs)
+  query: Record<string, string>; // fixed query-string params appended to navigations
   login: LoginFlow;
   isDefault: boolean;
   createdAt: string;
@@ -568,19 +592,35 @@ type EnvRow = {
   baseUrl: string;
   varsJson: string;
   loginJson: string;
+  headersJson: string;
+  queryJson: string;
+  sessionEnc: string;
   isDefault: number;
   createdAt: string;
 };
-const rowToEnv = (r: EnvRow): Environment => ({
-  id: r.id,
-  projectId: r.projectId,
-  name: r.name,
-  baseUrl: r.baseUrl,
-  vars: JSON.parse(r.varsJson || "{}"),
-  login: JSON.parse(r.loginJson || "{}"),
-  isDefault: !!r.isDefault,
-  createdAt: r.createdAt,
-});
+const rowToEnv = (r: EnvRow): Environment => {
+  const login: LoginFlow = JSON.parse(r.loginJson || "{}");
+  // The session blob is stored encrypted in its own column, not in loginJson.
+  if (r.sessionEnc) {
+    try {
+      login.session = JSON.parse(decryptSecret(r.sessionEnc)) as StorageState;
+    } catch {
+      login.session = null;
+    }
+  }
+  return {
+    id: r.id,
+    projectId: r.projectId,
+    name: r.name,
+    baseUrl: r.baseUrl,
+    vars: JSON.parse(r.varsJson || "{}"),
+    headers: JSON.parse(r.headersJson || "{}"),
+    query: JSON.parse(r.queryJson || "{}"),
+    login,
+    isDefault: !!r.isDefault,
+    createdAt: r.createdAt,
+  };
+};
 export const listEnvironments = (projectId: string): Environment[] =>
   (db.prepare("SELECT * FROM environments WHERE projectId=? ORDER BY createdAt").all(projectId) as EnvRow[]).map(rowToEnv);
 export const getEnvironment = (id: string): Environment | undefined => {
@@ -608,22 +648,44 @@ export function upsertEnvironment(
     name: input.name,
     baseUrl: input.baseUrl ?? existing?.baseUrl ?? "",
     vars: input.vars ?? existing?.vars ?? {},
-    login: input.login ?? existing?.login ?? {},
+    headers: input.headers ?? existing?.headers ?? {},
+    query: input.query ?? existing?.query ?? {},
+    // Preserve the captured session across saves: the UI never round-trips the blob, so
+    // only overwrite it when the caller explicitly provides `session` (object or null).
+    login: input.login
+      ? {
+          ...input.login,
+          session:
+            input.login.session !== undefined
+              ? input.login.session
+              : existing?.login?.session ?? null,
+        }
+      : existing?.login ?? {},
     isDefault: input.isDefault ?? existing?.isDefault ?? false,
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
+  // Session lives in its own encrypted column, not in loginJson.
+  const { session, ...loginRest } = env.login;
+  const sessionEnc = session ? encryptSecret(JSON.stringify(session)) : "";
   // Only one default per project.
   if (env.isDefault)
     db.prepare("UPDATE environments SET isDefault=0 WHERE projectId=?").run(env.projectId);
   db.prepare(
-    `INSERT INTO environments (id,projectId,name,baseUrl,varsJson,loginJson,isDefault,createdAt)
-     VALUES (@id,@projectId,@name,@baseUrl,@varsJson,@loginJson,@isDefault,@createdAt)
-     ON CONFLICT(id) DO UPDATE SET name=@name,baseUrl=@baseUrl,varsJson=@varsJson,loginJson=@loginJson,isDefault=@isDefault`,
+    `INSERT INTO environments (id,projectId,name,baseUrl,varsJson,loginJson,headersJson,queryJson,sessionEnc,isDefault,createdAt)
+     VALUES (@id,@projectId,@name,@baseUrl,@varsJson,@loginJson,@headersJson,@queryJson,@sessionEnc,@isDefault,@createdAt)
+     ON CONFLICT(id) DO UPDATE SET name=@name,baseUrl=@baseUrl,varsJson=@varsJson,loginJson=@loginJson,headersJson=@headersJson,queryJson=@queryJson,sessionEnc=@sessionEnc,isDefault=@isDefault`,
   ).run({
-    ...env,
+    id: env.id,
+    projectId: env.projectId,
+    name: env.name,
+    baseUrl: env.baseUrl,
     varsJson: JSON.stringify(env.vars),
-    loginJson: JSON.stringify(env.login),
+    loginJson: JSON.stringify(loginRest),
+    headersJson: JSON.stringify(env.headers),
+    queryJson: JSON.stringify(env.query),
+    sessionEnc,
     isDefault: env.isDefault ? 1 : 0,
+    createdAt: env.createdAt,
   });
   return env;
 }

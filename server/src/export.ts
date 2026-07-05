@@ -70,7 +70,11 @@ export function buildExportFiles(
       (m[1] === "secret" ? secretNames : envVarNames).add(m[2]);
     }
   };
-  for (const e of environments) Object.keys(e.vars).forEach((k) => envVarNames.add(k));
+  for (const e of environments) {
+    Object.keys(e.vars).forEach((k) => envVarNames.add(k));
+    Object.values(e.headers ?? {}).forEach(scanText);
+    Object.values(e.query ?? {}).forEach(scanText);
+  }
   for (const c of cases) [...c.steps, ...c.postSteps].forEach((s) => scanText(s.text));
   for (const s of login?.steps ?? []) scanText(s);
 
@@ -96,6 +100,17 @@ export function buildExportFiles(
     null,
     2,
   );
+
+  // Fixed request headers (pass the site's own checks) → context-level extraHTTPHeaders.
+  // Secret/env refs become process.env reads at run time (see lit()). Query params are
+  // carried on baseURL / navigations; the captured session maps to the auth.setup below.
+  const headers = defaultEnv?.headers ?? {};
+  const headerEntries = Object.entries(headers).filter(([k]) => k.trim());
+  const headersBlock = headerEntries.length
+    ? `    extraHTTPHeaders: {\n` +
+      headerEntries.map(([k, v]) => `      ${JSON.stringify(k)}: ${lit(v)},`).join("\n") +
+      `\n    },\n`
+    : "";
 
   // storageState reuse: an auth "setup" project logs in once and saves the session;
   // all test projects start already-authenticated. This is the exported 登录态.
@@ -128,7 +143,7 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || ${JSON.stringify(defaultEnv?.baseUrl || project.targetUrl)},
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-  },
+${headersBlock}  },
 ${projects}
 });
 `;

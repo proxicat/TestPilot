@@ -41,6 +41,7 @@ import {
   listEnvironments,
   getEnvironment,
   upsertEnvironment,
+  type StorageState,
   deleteEnvironment,
   resolveEnvironment,
   listSecretMeta,
@@ -76,7 +77,7 @@ import {
   DEFAULT_PROMPTS,
   LLM_DEBUG_DIR,
 } from "./settings.js";
-import { resolveText, redact, type ResolveContext } from "./interpolate.js";
+import { resolveText, resolveMap, redact, type ResolveContext } from "./interpolate.js";
 import { seedIfEmpty } from "./seed.js";
 import { buildExportFiles } from "./export.js";
 import { captureMidsceneReport } from "./report.js";
@@ -136,6 +137,9 @@ async function executeRun(
     login?: string[]; // login-flow step templates (登录态), run before case steps
     postSteps?: string[]; // teardown/cleanup step templates, run after the assert
     resolve?: ResolveContext; // ${env.*}/${secret.*} resolution context
+    extraHeaders?: Record<string, string>; // fixed request headers (resolved)
+    query?: Record<string, string>; // fixed query-string params
+    storageState?: StorageState | null; // captured login state to inject
   } = {},
 ): Promise<RunResult> {
   const injected = !!opts.injected;
@@ -158,11 +162,16 @@ async function executeRun(
   };
   try {
     logs.push(`navigate → ${url}${injected ? " (injected wallet)" : wallet ? " (with MetaMask)" : ""}`);
+    const dataOpts = {
+      extraHeaders: opts.extraHeaders,
+      query: opts.query,
+      storageState: opts.storageState,
+    };
     session = await launchSession(
       url,
       injected
-        ? { injected: true, rpcUrl: opts.rpcUrl, chainId: opts.chainId, cacheId: opts.cacheId }
-        : { wallet, cacheId: opts.cacheId },
+        ? { injected: true, rpcUrl: opts.rpcUrl, chainId: opts.chainId, cacheId: opts.cacheId, ...dataOpts }
+        : { wallet, cacheId: opts.cacheId, ...dataOpts },
     );
     if (injected) logs.push(`injected wallet ${session.injectedAddress}`);
     else if (wallet && session.walletId) {
@@ -807,7 +816,12 @@ async function runAndPersistCase(
   };
   const url = resolveText(body?.url || env?.baseUrl || project?.targetUrl || "", ctx);
   if (!url) throw new Error("no url (set an environment baseUrl or project targetUrl)");
-  const login = env?.login?.authRequired && !body?.skipLogin ? env.login.steps ?? [] : [];
+  // Login state: if a session was captured, INJECT it and skip the login steps (fast,
+  // best-practice). Otherwise fall back to running the UI login flow.
+  const session = env?.login?.session ?? null;
+  const useSession = !!env?.login?.authRequired && !!session && !body?.skipLogin;
+  const login =
+    env?.login?.authRequired && !useSession && !body?.skipLogin ? env.login.steps ?? [] : [];
   const injected = body?.provider === "injected" || !!body?.injected;
 
   const result = await executeRun(url, c.steps.map((s) => s.text), body?.expected || c.expected || "", {
@@ -819,6 +833,9 @@ async function runAndPersistCase(
     login,
     postSteps: c.postSteps.map((s) => s.text),
     resolve: ctx,
+    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    query: resolveMap(env?.query ?? {}, ctx),
+    storageState: useSession ? session : null,
   });
 
   const perf = comparePerf(result.perfMetrics, getPerfBaseline(c.id), {});
@@ -941,8 +958,16 @@ app.get("/api/cases/:id/debug", async (req, res) => {
     ctx,
   );
   const hint = String(req.query.hint || "").trim();
-  const doLogin = env?.login?.authRequired && req.query.skipLogin !== "1";
+  // Same login-state policy as a real run: captured session → inject + skip login steps.
+  const session0 = env?.login?.session ?? null;
+  const useSession = !!env?.login?.authRequired && !!session0 && req.query.skipLogin !== "1";
+  const doLogin = env?.login?.authRequired && !useSession && req.query.skipLogin !== "1";
   const loginSteps = doLogin ? env?.login?.steps ?? [] : [];
+  const dataLaunch = {
+    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    query: resolveMap(env?.query ?? {}, ctx),
+    storageState: useSession ? session0 : null,
+  };
   const plan = [
     ...loginSteps.map((t) => ({ text: t, kind: "login" as const })),
     ...c.steps.map((s) => ({ text: s.text, kind: "step" as const })),
@@ -969,7 +994,7 @@ app.get("/api/cases/:id/debug", async (req, res) => {
     if (!url) throw new Error("no url (set an environment baseUrl or project targetUrl)");
     send({ type: "start", url, steps: plan.map((p) => ({ text: redact(p.text, secretVals), kind: p.kind })), hint: hint || undefined });
     // Fresh session, no cacheId → the model replans (true debug, not cache replay).
-    session = await launchSession(url);
+    session = await launchSession(url, dataLaunch);
     if (hint) {
       try {
         (session.agent as { setAIActionContext?: (h: string) => void }).setAIActionContext?.(hint);
@@ -1068,7 +1093,7 @@ app.post("/api/projects/:id/explore", async (req, res) => {
     const { explore, exploreDeepPrefix } = getSettings().prompts;
     // Force the model's flow text into the UI language when the global toggle is on.
     const dir = langDirective(req.body?.lang);
-    session = await launchSession(url, { cacheId: `explore-${project.id}` });
+    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id) });
     const collected: Flow[] = asFlows(await session.agent.aiQuery(explore + dir));
     explLog.push(`entry page → ${collected.length} flows`);
 
@@ -1113,6 +1138,22 @@ app.post("/api/projects/:id/explore", async (req, res) => {
     await session?.cleanup();
   }
 });
+
+// Data-binding launch opts for exploration: apply the project default env's fixed headers,
+// query params, and captured session so a gated / behind-login site can still be explored.
+function exploreLaunch(projectId: string): {
+  extraHeaders: Record<string, string>;
+  query: Record<string, string>;
+  storageState: StorageState | null;
+} {
+  const env = resolveEnvironment(projectId);
+  const ctx: ResolveContext = { env: env?.vars ?? {}, secrets: getSecretValues(projectId) };
+  return {
+    extraHeaders: resolveMap(env?.headers ?? {}, ctx),
+    query: resolveMap(env?.query ?? {}, ctx),
+    storageState: env?.login?.session ?? null,
+  };
+}
 
 // Streaming explore (SSE): the same planning as POST /explore, but pushes the LIVE page
 // screenshot, log lines, and each discovered flow as they happen — so the UI shows the
@@ -1172,7 +1213,7 @@ app.get("/api/projects/:id/explore/stream", async (req, res) => {
     send({ type: "start", url });
     const { explore, exploreDeepPrefix } = getSettings().prompts;
     const dir = langDirective(lang);
-    session = await launchSession(url, { cacheId: `explore-${project.id}` });
+    session = await launchSession(url, { cacheId: `explore-${project.id}`, ...exploreLaunch(project.id) });
     send({ type: "navigated", screenshot: await jpeg() });
     send({ type: "log", message: `Analyzing ${url}…`, kind: "info" });
 
@@ -1250,12 +1291,29 @@ app.post("/api/explore", async (req, res) => {
   }
 });
 
-/* ---- environments (per-project target + vars + login flow) ---- */
+/* ---- environments (per-project target + vars + headers/query + login/session) ---- */
+// The captured session blob (live auth cookies + localStorage) NEVER leaves the server.
+// The UI only sees whether one exists + when it was captured + its size.
+function sanitizeEnv(env: Environment) {
+  const s = env.login?.session ?? null;
+  return {
+    ...env,
+    login: {
+      authRequired: env.login?.authRequired ?? false,
+      steps: env.login?.steps ?? [],
+      capturedAt: env.login?.capturedAt,
+      hasSession: !!s,
+      sessionCookies: s?.cookies?.length ?? 0,
+      sessionOrigins: s?.origins?.length ?? 0,
+    },
+  };
+}
+
 app.get("/api/projects/:id/environments", (req, res) => {
-  res.json({ environments: listEnvironments(req.params.id) });
+  res.json({ environments: listEnvironments(req.params.id).map(sanitizeEnv) });
 });
 app.post("/api/projects/:id/environments", (req, res) => {
-  const { name, baseUrl, vars, login, isDefault } = req.body ?? {};
+  const { name, baseUrl, vars, headers, query, login, isDefault } = req.body ?? {};
   if (!name) return res.status(400).json({ error: "name is required" });
   const environment = upsertEnvironment({
     projectId: req.params.id,
@@ -1263,14 +1321,84 @@ app.post("/api/projects/:id/environments", (req, res) => {
     name,
     baseUrl: baseUrl ?? "",
     vars: vars ?? {},
+    headers: headers ?? {},
+    query: query ?? {},
+    // No `session` key here → upsert preserves any captured session.
     login: login ?? {},
     isDefault: !!isDefault,
   });
-  res.json({ environment });
+  res.json({ environment: sanitizeEnv(environment) });
 });
 app.delete("/api/environments/:id", (req, res) => {
   deleteEnvironment(req.params.id);
   res.json({ ok: true });
+});
+
+// Capture login state: run the env's login flow once, then read cookies + localStorage
+// into a reusable storageState. Subsequent runs inject it and SKIP the login steps.
+app.post("/api/environments/:id/capture-session", async (req, res) => {
+  const env = getEnvironment(req.params.id);
+  if (!env) return res.status(404).json({ error: "environment not found" });
+  const steps = env.login?.steps ?? [];
+  if (!steps.length)
+    return res.status(400).json({ error: "this environment has no login steps to run" });
+  const ctx: ResolveContext = { env: env.vars, secrets: getSecretValues(env.projectId) };
+  const secretVals = Object.values(ctx.secrets);
+  const url = resolveText(env.baseUrl || getProject(env.projectId)?.targetUrl || "", ctx);
+  if (!url) return res.status(400).json({ error: "no baseUrl set for this environment" });
+
+  let session: Awaited<ReturnType<typeof launchSession>> | undefined;
+  try {
+    session = await launchSession(url, {
+      extraHeaders: resolveMap(env.headers, ctx),
+      query: resolveMap(env.query, ctx),
+    });
+    const log: string[] = [];
+    for (const t of steps) {
+      log.push(redact(`login: ${t}`, secretVals));
+      await session.agent.aiAction(resolveText(t, ctx));
+    }
+    const cookies = await session.page.cookies();
+    const ls = await session.page.evaluate(() => {
+      const items: { name: string; value: string }[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k != null) items.push({ name: k, value: window.localStorage.getItem(k) ?? "" });
+      }
+      return { origin: location.origin, items };
+    });
+    const storageState: StorageState = {
+      cookies: cookies as unknown as StorageState["cookies"],
+      origins: ls.items.length ? [{ origin: ls.origin, localStorage: ls.items }] : [],
+    };
+    const capturedAt = new Date().toISOString();
+    const saved = upsertEnvironment({
+      ...env,
+      login: { ...env.login, authRequired: true, session: storageState, capturedAt },
+    });
+    res.json({
+      ok: true,
+      cookies: storageState.cookies.length,
+      localStorage: ls.items.length,
+      log,
+      environment: sanitizeEnv(saved),
+    });
+  } catch (e) {
+    res.status(502).json({ error: `capture failed: ${(e as Error).message}` });
+  } finally {
+    await session?.cleanup?.();
+  }
+});
+
+// Clear a captured session (revert to running the UI login flow each run).
+app.delete("/api/environments/:id/session", (req, res) => {
+  const env = getEnvironment(req.params.id);
+  if (!env) return res.status(404).json({ error: "environment not found" });
+  const saved = upsertEnvironment({
+    ...env,
+    login: { ...env.login, session: null, capturedAt: undefined },
+  });
+  res.json({ ok: true, environment: sanitizeEnv(saved) });
 });
 
 /* ---- secrets vault (metadata in/out; plaintext only ever set, never read back) ---- */
