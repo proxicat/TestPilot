@@ -42,6 +42,7 @@ import {
   getEnvironment,
   upsertEnvironment,
   type StorageState,
+  type ChainAssertion,
   deleteEnvironment,
   resolveEnvironment,
   listSecretMeta,
@@ -78,6 +79,7 @@ import {
   LLM_DEBUG_DIR,
 } from "./settings.js";
 import { resolveText, resolveMap, redact, type ResolveContext } from "./interpolate.js";
+import { snapshotBalances, evalChainAssertion } from "./chain.js";
 import { seedIfEmpty } from "./seed.js";
 import { buildExportFiles } from "./export.js";
 import { captureMidsceneReport } from "./report.js";
@@ -141,6 +143,13 @@ async function executeRun(
     extraHeaders?: Record<string, string>; // fixed request headers (resolved)
     query?: Record<string, string>; // fixed query-string params
     storageState?: StorageState | null; // captured login state to inject
+    web3?: {
+      // dapp run: settle-wait after nav + on-chain assertions checked before/after the steps
+      chainAssertions: ChainAssertion[];
+      rpcUrl: string;
+      account: string;
+      settleMs?: number;
+    };
   } = {},
 ): Promise<RunResult> {
   const injected = !!opts.injected;
@@ -192,6 +201,17 @@ async function executeRun(
       }
       await shot();
     }
+    // Dapp/SPA settle: give the app time to detect the injected wallet + render before we
+    // act/assert (a bare domcontentloaded fires before a React dapp is interactive).
+    if (opts.web3) {
+      await new Promise((r) => setTimeout(r, opts.web3!.settleMs ?? 4000));
+    }
+    // On-chain snapshot BEFORE the steps, so balance-delta assertions measure their effect.
+    let chainBefore: bigint[] = [];
+    if (opts.web3?.chainAssertions?.length) {
+      chainBefore = await snapshotBalances(opts.web3.rpcUrl, opts.web3.chainAssertions, opts.web3.account);
+      rlog(`chain snapshot (before) — ${chainBefore.length} balance(s)`);
+    }
     for (const [i, step] of steps.entries()) {
       rlog(`step ${i + 1}: ${step}`);
       await session.agent.aiAction(resolveText(step, ctx));
@@ -220,6 +240,22 @@ async function executeRun(
           rlog(`assert ✗ — ${detail}`);
           assertFailed = detail;
         }
+      }
+    }
+    // On-chain oracle: read the chain AFTER the steps and evaluate each assertion. These
+    // join the same oracle array (so they show + gate the verdict) — verifies real state,
+    // not just the UI. Snapshot before teardown so cleanup doesn't skew it.
+    if (opts.web3?.chainAssertions?.length) {
+      try {
+        const after = await snapshotBalances(opts.web3.rpcUrl, opts.web3.chainAssertions, opts.web3.account);
+        opts.web3.chainAssertions.forEach((a, i) => {
+          const r = evalChainAssertion(a, chainBefore[i] ?? 0n, after[i] ?? 0n);
+          oracle.push(r);
+          rlog(`chain ${r.status === "pass" ? "✓" : "✗"} ${r.assertion} — ${r.detail}`);
+          if (r.status === "fail") assertFailed = assertFailed || `chain assertion: ${r.assertion}`;
+        });
+      } catch (e) {
+        rlog(`chain assertions skipped — ${redact((e as Error).message, secretVals).slice(0, 70)}`);
       }
     }
     // Teardown (post steps): best-effort cleanup so runs stay independent/repeatable.
@@ -825,15 +861,29 @@ async function runAndPersistCase(
   const useSession = !!env?.login?.authRequired && !!session && !body?.skipLogin;
   const login =
     env?.login?.authRequired && !useSession && !body?.skipLogin ? env.login.steps ?? [] : [];
-  const injected = body?.provider === "injected" || !!body?.injected;
+  // Wallet mode: from the run body OR the case's web3Mode (so suite/debug honor it too).
+  const injected = body?.provider === "injected" || !!body?.injected || c.web3Mode === "injected";
+  const wallet = !!body?.wallet || c.web3Mode === "metamask";
+  // Dapp run: resolve the chain + on-chain assertions when the case is a web3 case.
+  const chainCfg = resolveChainConfig({ rpcUrl: body?.rpcUrl, chainId: body?.chainId });
+  const web3 =
+    c.web3Mode || (c.chainAssertions && c.chainAssertions.length)
+      ? {
+          chainAssertions: c.chainAssertions ?? [],
+          rpcUrl: chainCfg.rpcUrl,
+          account: TEST_ACCOUNT,
+          settleMs: 4000,
+        }
+      : undefined;
 
   const result = await executeRun(url, c.steps.map((s) => s.text), body?.expected || c.expected || "", {
     injected,
-    wallet: !!body?.wallet,
+    wallet,
     rpcUrl: body?.rpcUrl,
     chainId: body?.chainId,
     cacheId: c.id + (body?.__cacheSuffix ?? ""), // per-row cache so data-driven rows don't collide
     login,
+    web3,
     postSteps: c.postSteps.map((s) => s.text),
     resolve: ctx,
     rowLabel: body?.__rowLabel,

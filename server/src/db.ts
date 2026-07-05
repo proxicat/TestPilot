@@ -180,6 +180,10 @@ if (!caseCols.has("quarantined"))
   db.exec("ALTER TABLE test_cases ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0");
 if (!caseCols.has("dataKey"))
   db.exec("ALTER TABLE test_cases ADD COLUMN dataKey TEXT DEFAULT ''");
+if (!caseCols.has("web3Mode"))
+  db.exec("ALTER TABLE test_cases ADD COLUMN web3Mode TEXT DEFAULT ''");
+if (!caseCols.has("chainAssertionsJson"))
+  db.exec("ALTER TABLE test_cases ADD COLUMN chainAssertionsJson TEXT NOT NULL DEFAULT '[]'");
 const batchCols = new Set(
   (db.prepare("PRAGMA table_info(batches)").all() as { name: string }[]).map((r) => r.name),
 );
@@ -210,6 +214,18 @@ export interface Step {
   text: string;
 }
 export type CaseType = "functional" | "negative" | "boundary" | "e2e";
+export type Web3Mode = "" | "injected" | "metamask"; // "" = no wallet
+// An on-chain assertion checked against the RPC after the case's steps run — verifies the
+// real chain state, not just the UI (e.g. a token balance rose after a swap).
+export interface ChainAssertion {
+  kind: "erc20Balance" | "nativeBalance";
+  account?: string; // default: the test wallet
+  token?: string; // ERC-20 contract (for erc20Balance)
+  decimals?: number; // token decimals for display/compare (default 18; USDC=6)
+  op: "increased" | "decreased" | "changed" | "gte" | "lte" | "eq";
+  value?: string; // human-unit threshold for gte/lte/eq
+  label?: string; // display label
+}
 export interface TestCase {
   id: string;
   projectId: string;
@@ -224,6 +240,8 @@ export interface TestCase {
   requirementId?: string; // trace back to a requirement/PRD item
   envRef?: string; // environment name this case binds to ("" = project default)
   dataKey?: string; // env array var to iterate — data-driven: one run per row (${row}/${row.col})
+  web3Mode?: Web3Mode; // wallet to inject for dapp runs ("" = none)
+  chainAssertions?: ChainAssertion[]; // on-chain checks evaluated after the steps
   postSteps: Step[]; // cleanup / teardown actions
   quarantined: boolean; // flaky → runs but excluded from the CI gate
   steps: Step[];
@@ -360,11 +378,15 @@ export interface BatchRun {
 }
 
 /* ---- serialization ---- */
-type CaseRow = Omit<TestCase, "steps" | "postSteps" | "hasCode" | "quarantined"> & {
+type CaseRow = Omit<
+  TestCase,
+  "steps" | "postSteps" | "hasCode" | "quarantined" | "chainAssertions"
+> & {
   steps: string;
   postSteps: string;
   hasCode: number;
   quarantined: number;
+  chainAssertionsJson: string;
 };
 const rowToCase = (r: CaseRow): TestCase => ({
   ...r,
@@ -373,6 +395,7 @@ const rowToCase = (r: CaseRow): TestCase => ({
   type: r.type || "functional",
   postSteps: JSON.parse(r.postSteps || "[]"),
   steps: JSON.parse(r.steps || "[]"),
+  chainAssertions: JSON.parse(r.chainAssertionsJson || "[]"),
 });
 type RunRow = Omit<
   RunRecord,
@@ -439,6 +462,8 @@ export function createCase(input: Partial<TestCase> & { projectId: string; title
     requirementId: input.requirementId || "",
     envRef: input.envRef || "",
     dataKey: input.dataKey || "",
+    web3Mode: input.web3Mode || "",
+    chainAssertions: input.chainAssertions || [],
     postSteps: input.postSteps || [],
     quarantined: input.quarantined ?? false,
     steps: input.steps || [],
@@ -446,12 +471,14 @@ export function createCase(input: Partial<TestCase> & { projectId: string; title
     createdAt: input.createdAt || new Date().toISOString(),
   };
   db.prepare(
-    `INSERT INTO test_cases (id,projectId,title,priority,priorityReason,runStatus,hasCode,precondition,expected,type,requirementId,envRef,dataKey,postSteps,quarantined,steps,code,createdAt)
-     VALUES (@id,@projectId,@title,@priority,@priorityReason,@runStatus,@hasCode,@precondition,@expected,@type,@requirementId,@envRef,@dataKey,@postSteps,@quarantined,@steps,@code,@createdAt)`,
+    `INSERT INTO test_cases (id,projectId,title,priority,priorityReason,runStatus,hasCode,precondition,expected,type,requirementId,envRef,dataKey,web3Mode,chainAssertionsJson,postSteps,quarantined,steps,code,createdAt)
+     VALUES (@id,@projectId,@title,@priority,@priorityReason,@runStatus,@hasCode,@precondition,@expected,@type,@requirementId,@envRef,@dataKey,@web3Mode,@chainAssertionsJson,@postSteps,@quarantined,@steps,@code,@createdAt)`,
   ).run({
     ...c,
     hasCode: c.hasCode ? 1 : 0,
     quarantined: c.quarantined ? 1 : 0,
+    web3Mode: c.web3Mode || "",
+    chainAssertionsJson: JSON.stringify(c.chainAssertions ?? []),
     postSteps: JSON.stringify(c.postSteps),
     steps: JSON.stringify(c.steps),
   });
@@ -470,9 +497,11 @@ export function updateCase(id: string, patch: Partial<TestCase>): TestCase | und
   db.prepare(
     `UPDATE test_cases SET title=@title,priority=@priority,priorityReason=@priorityReason,
      runStatus=@runStatus,hasCode=@hasCode,precondition=@precondition,expected=@expected,
-     type=@type,requirementId=@requirementId,envRef=@envRef,dataKey=@dataKey,postSteps=@postSteps,quarantined=@quarantined,steps=@steps,code=@code WHERE id=@id`,
+     type=@type,requirementId=@requirementId,envRef=@envRef,dataKey=@dataKey,web3Mode=@web3Mode,chainAssertionsJson=@chainAssertionsJson,postSteps=@postSteps,quarantined=@quarantined,steps=@steps,code=@code WHERE id=@id`,
   ).run({
     ...next,
+    web3Mode: next.web3Mode ?? "",
+    chainAssertionsJson: JSON.stringify(next.chainAssertions ?? []),
     expected: next.expected ?? "",
     requirementId: next.requirementId ?? "",
     envRef: next.envRef ?? "",

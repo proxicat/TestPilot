@@ -14,11 +14,22 @@ import {
   CircleX,
   AlertTriangle,
   Lock,
+  Plus,
+  Trash2,
+  Blocks,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import type { Flakiness, Priority, RunRecord, Step, TestCase } from "@/lib/types";
+import type {
+  ChainAssertion,
+  Flakiness,
+  Priority,
+  RunRecord,
+  Step,
+  TestCase,
+  Web3Mode,
+} from "@/lib/types";
 import { RunDetail } from "@/components/RunDetail";
 import { cn } from "@/lib/cn";
 import { api, type RefineTarget } from "@/lib/api";
@@ -889,6 +900,99 @@ function DebugModal({ tc, onClose }: { tc: TestCase; onClose: () => void }) {
   );
 }
 
+// Web3 run options + on-chain assertions. When a wallet mode is set, the run injects that
+// wallet (chain/RPC from the global Web3 config) and waits for the dapp to settle; chain
+// assertions read balances before/after the steps and join the oracle.
+const INPUT = "rounded border border-border bg-background px-1.5 py-1 text-[11px] outline-none focus:ring-2 focus:ring-ring";
+function Web3Section({ tc }: { tc: TestCase }) {
+  const t = useT();
+  const patchCase = useStore((s) => s.patchCase);
+  const mode = tc.web3Mode ?? "";
+  const [rows, setRows] = useState<ChainAssertion[]>(tc.chainAssertions ?? []);
+  useEffect(() => setRows(tc.chainAssertions ?? []), [tc.id, tc.chainAssertions]);
+  const commit = (next: ChainAssertion[]) => {
+    setRows(next);
+    void patchCase(tc.id, { chainAssertions: next });
+  };
+  const setLocal = (i: number, patch: Partial<ChainAssertion>) =>
+    setRows(rows.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  const commitLocal = (i: number, patch: Partial<ChainAssertion>) =>
+    commit(rows.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  const show = mode !== "" || rows.length > 0;
+
+  return (
+    <div className="border-b border-border px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Blocks className="h-3.5 w-3.5 text-violet-500" />
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("cases.web3")}</span>
+      </div>
+      <select
+        value={mode}
+        onChange={(e) => void patchCase(tc.id, { web3Mode: e.target.value as Web3Mode })}
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="">{t("cases.web3None")}</option>
+        <option value="injected">{t("cases.web3Injected")}</option>
+        <option value="metamask">{t("cases.web3Metamask")}</option>
+      </select>
+      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("cases.web3Help")}</p>
+
+      {show && (
+        <div className="mt-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground">{t("cases.chainAssertions")}</span>
+            <button
+              onClick={() => commit([...rows, { kind: "erc20Balance", op: "increased", token: "", account: "", value: "", decimals: 6 }])}
+              className="flex cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              <Plus className="h-3 w-3" /> {t("common.add")}
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {rows.map((a, i) => (
+              <div key={i} className="space-y-1 rounded-md border border-border p-1.5">
+                <div className="flex items-center gap-1">
+                  <select value={a.kind} onChange={(e) => commitLocal(i, { kind: e.target.value as ChainAssertion["kind"] })} className={cn(INPUT, "flex-1")}>
+                    <option value="erc20Balance">{t("cases.erc20")}</option>
+                    <option value="nativeBalance">{t("cases.native")}</option>
+                  </select>
+                  <select value={a.op} onChange={(e) => commitLocal(i, { op: e.target.value as ChainAssertion["op"] })} className={INPUT}>
+                    <option value="increased">↑ increased</option>
+                    <option value="decreased">↓ decreased</option>
+                    <option value="changed">≠ changed</option>
+                    <option value="gte">≥</option>
+                    <option value="lte">≤</option>
+                    <option value="eq">=</option>
+                  </select>
+                  {(a.op === "gte" || a.op === "lte" || a.op === "eq") && (
+                    <input
+                      value={a.value ?? ""}
+                      onChange={(e) => setLocal(i, { value: e.target.value })}
+                      onBlur={() => commit(rows)}
+                      placeholder="0.0"
+                      className={cn(INPUT, "w-14 font-mono")}
+                    />
+                  )}
+                  <button onClick={() => commit(rows.filter((_, idx) => idx !== i))} aria-label="Remove" className="cursor-pointer text-muted-foreground hover:text-red-500">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+                {a.kind === "erc20Balance" && (
+                  <div className="flex gap-1">
+                    <input value={a.token ?? ""} onChange={(e) => setLocal(i, { token: e.target.value })} onBlur={() => commit(rows)} placeholder="token 0x… (USDC 0xA0b8…eB48)" className={cn(INPUT, "min-w-0 flex-1 font-mono")} />
+                    <input type="number" value={a.decimals ?? 6} onChange={(e) => commitLocal(i, { decimals: Number(e.target.value) })} title="decimals" className={cn(INPUT, "w-12 font-mono")} />
+                  </div>
+                )}
+                <input value={a.account ?? ""} onChange={(e) => setLocal(i, { account: e.target.value })} onBlur={() => commit(rows)} placeholder={t("cases.accountDefault")} className={cn(INPUT, "w-full font-mono")} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DetailPanel({ tc, flake }: { tc: TestCase; flake?: Flakiness }) {
   const t = useT();
   const setPriority = useStore((s) => s.setPriority);
@@ -1097,6 +1201,8 @@ function DetailPanel({ tc, flake }: { tc: TestCase; flake?: Flakiness }) {
           )}
         </p>
       </div>
+
+      <Web3Section tc={tc} />
 
       <div className="flex flex-col border-b border-border px-3 py-2.5">
         <div className="mb-1.5 flex items-center">

@@ -64,6 +64,17 @@ export interface Project {
   createdAt: string;
 }
 
+export type Web3Mode = "" | "injected" | "metamask";
+export interface ChainAssertion {
+  kind: "erc20Balance" | "nativeBalance";
+  account?: string;
+  token?: string;
+  decimals?: number;
+  op: "increased" | "decreased" | "changed" | "gte" | "lte" | "eq";
+  value?: string;
+  label?: string;
+}
+
 export interface TestCase {
   id: string;
   projectId?: string;
@@ -80,6 +91,8 @@ export interface TestCase {
   requirementId?: string;
   envRef?: string;
   dataKey?: string; // env array var to iterate — data-driven: one run per row
+  web3Mode?: Web3Mode; // wallet to inject for dapp runs
+  chainAssertions?: ChainAssertion[]; // on-chain checks after the steps
   postSteps?: Step[];
   quarantined?: boolean;
 }
