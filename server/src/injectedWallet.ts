@@ -87,8 +87,12 @@ export async function setupInjectedWallet(
       sentTxs.push(sent.hash);
       return sent.hash;
     }
-    if (method === "personal_sign") return wallet.signMessage(getBytes(params[0] as string));
-    if (method === "eth_sign") return wallet.signMessage(getBytes(params[1] as string));
+    // personal_sign/eth_sign messages may be a hex string (bytes) OR a plain UTF-8 string
+    // (many dapps pass the latter) — getBytes throws on non-hex, so only decode real hex.
+    const asMessage = (m: unknown) =>
+      typeof m === "string" && /^0x[0-9a-fA-F]*$/.test(m) ? getBytes(m) : (m as string);
+    if (method === "personal_sign") return wallet.signMessage(asMessage(params[0]));
+    if (method === "eth_sign") return wallet.signMessage(asMessage(params[1]));
     if (method === "eth_signTypedData_v4" || method === "eth_signTypedData") {
       const typed = typeof params[1] === "string" ? JSON.parse(params[1] as string) : (params[1] as Record<string, unknown>);
       const types = { ...(typed.types as Record<string, unknown>) };
