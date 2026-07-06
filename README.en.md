@@ -64,6 +64,8 @@ Unlike record-and-replay or hand-written selectors, cases are expressed in natur
 | ✅ **Dual oracle** | Functional assertion (`aiAssert`) + on-chain assertions / visual-baseline diff / performance budget |
 | ⛓ **Dapp / on-chain assertions** | Injected wallet auto-confirms popups; assert balance deltas and **"wallet sent a successful tx" (receipt status=1)** |
 | 🔁 **Suite · gate · self-heal** | Concurrency queue, retry on failure, cache-bust self-heal, CI gate, flakiness stats & quarantine |
+| 🖼 **Visual / perf baselines** | Per-step pixel diff (triptych + approve-as-baseline); TTFB/FCP/DCL/Load budget with regression flags |
+| 🐞 **Live case debugging** | Step-by-step SSE replay + intent-first AI fix (edit steps/assertion, preview the diff before saving) |
 | 📊 **Trends dashboard** | Pass rate, flake rate, mean-time-to-repair, coverage, heal rate |
 | 🔐 **Environments & secrets** | Per-project env vars, encrypted secrets, login state (API login / cookie / storageState) |
 | 🧬 **Data-driven** | Bind a dataset, run once per row (`${row}` / `${row.col}`) |
@@ -89,6 +91,11 @@ A P0/P1/P2 board. Each case carries natural-language steps, an expected assertio
 
 ![Cases](docs/screenshots/en/02-cases-board.png)
 
+### 🐞 Live case debugging
+Select a case and hit "Debug" to open live debug: each step is replayed over SSE with a live screenshot of the page on the right (dapp cases auto-inject the wallet — `provider:present`). You see exactly which step fails, and can apply an **intent-first** "Fix with AI" — first declare whether you're changing the *steps* or the *assertion*, preview the diff, then save and re-run.
+
+![Live debug](docs/screenshots/en/12-debug.png)
+
 ### ⛓ Dapp / on-chain assertions (the headline)
 A case can run with an **injected virtual wallet** and carry **on-chain assertions**. Below: one real UI click on "Send 0.01 ETH" → assert "wallet sent a successful tx ≥ 1" → poll the receipt to confirm it mined → pass. That is the closest thing to the user's truth, and it doesn't depend on the model reading the dapp's success UI.
 
@@ -103,6 +110,16 @@ Run by priority in bulk; each suite yields pass/fail, a gate result (can block C
 A project-level run ledger: total runs, pass rate, P0 pass rate, average duration, and per-run oracle details.
 
 ![Runs](docs/screenshots/en/04-runs-report.png)
+
+### ⏱ Performance baseline
+Every run captures TTFB / FCP / DCL / Load, compares each metric to the baseline and computes Δ%; over-budget metrics are flagged red as a "regression", and the first run establishes the baseline.
+
+![Performance baseline](docs/screenshots/en/10-perf-baseline.png)
+
+### 🖼 Visual baseline
+Per-step screenshots are pixel-diffed (pixelmatch) against the baseline, giving a "baseline │ current │ diff" triptych and a mismatch %. If the change is intended, "Approve as baseline" updates it in one click.
+
+![Visual baseline](docs/screenshots/en/11-visual-baseline.png)
 
 ### Trends dashboard
 Pass rate over time (green = gate passed, red = gate failed), flake rate, mean-time-to-repair, coverage, heal rate, and per-suite result distribution.
