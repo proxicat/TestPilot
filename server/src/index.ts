@@ -1114,7 +1114,15 @@ app.get("/api/cases/:id/debug", async (req, res) => {
   const useSession = !!env?.login?.authRequired && !!session0 && req.query.skipLogin !== "1";
   const doLogin = env?.login?.authRequired && !useSession && req.query.skipLogin !== "1";
   const loginSteps = doLogin ? env?.login?.steps ?? [] : [];
+  // Honor the case's web3 mode so debugging a dapp case behaves like a real run
+  // (inject the wallet), not a wallet-less page where provider is absent.
+  const dbgInjected = c.web3Mode === "injected";
+  const dbgChain = resolveChainConfig({});
   const dataLaunch = {
+    injected: dbgInjected,
+    wallet: c.web3Mode === "metamask",
+    rpcUrl: dbgInjected ? dbgChain.rpcUrl : undefined,
+    chainId: dbgInjected ? dbgChain.chainId : undefined,
     extraHeaders: { ...resolveMap(env?.headers ?? {}, ctx), ...(useSession ? session0?.headers ?? {} : {}) },
     query: resolveMap(env?.query ?? {}, ctx),
     storageState: useSession ? session0 : null,
